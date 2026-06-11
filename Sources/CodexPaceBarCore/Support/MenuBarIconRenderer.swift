@@ -30,7 +30,6 @@ public final class MenuBarIconRenderer {
         let segmentWidth = (barWidth - CGFloat(segmentCount - 1) * gap) / CGFloat(segmentCount)
         let segmentHeight = min(max(size.height * 0.55, 9), 24)
         let segmentY = (size.height - segmentHeight) / 2
-        let radius = min(segmentHeight / 4, 5)
 
         let bands = colorBands(snapshot: snapshot, state: state, isStale: isStale, colorScheme: colorScheme)
         let emptyColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.35)
@@ -38,7 +37,7 @@ public final class MenuBarIconRenderer {
         for index in 0..<segmentCount {
             let x = barStartX + CGFloat(index) * (segmentWidth + gap)
             let rect = NSRect(x: x, y: segmentY, width: segmentWidth, height: segmentHeight)
-            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+            let path = NSBezierPath(rect: rect)
 
             emptyColor.setFill()
             path.fill()
