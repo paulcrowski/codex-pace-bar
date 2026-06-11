@@ -41,7 +41,7 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 
 ## Settings
 
-![Codex Pace Bar settings](docs/screenshots/settings.png)
+![Codex Pace Bar settings](docs/screenshots/settings.png?v=06760d5)
 
 Settings are intentionally small:
 
