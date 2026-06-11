@@ -48,6 +48,7 @@ Settings are intentionally small:
 - Codex executable path.
 - Refresh interval.
 - Pace delta threshold.
+- Daily notification when usage is well above pace.
 - Bar color scheme.
 
 Settings are stored in `UserDefaults`.

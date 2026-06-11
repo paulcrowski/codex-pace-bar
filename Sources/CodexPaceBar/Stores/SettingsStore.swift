@@ -12,6 +12,15 @@ final class SettingsStore {
     static let defaultDeltaThreshold = 2
     static let maximumDeltaThreshold = 20
 
+    var notificationsEnabled: Bool {
+        didSet {
+            guard notificationsEnabled != oldValue else {
+                return
+            }
+            defaults.set(notificationsEnabled, forKey: Keys.notificationsEnabled)
+        }
+    }
+
     var codexExecutablePath: String {
         didSet {
             guard codexExecutablePath != oldValue else {
@@ -76,6 +85,7 @@ final class SettingsStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
         self.codexExecutablePath = defaults.string(forKey: Keys.codexExecutablePath) ?? "codex"
         let storedInterval = defaults.object(forKey: Keys.refreshIntervalSeconds) as? Int ?? Self.defaultRefreshInterval
         self.refreshIntervalSeconds = Self.clampRefreshInterval(storedInterval)
@@ -94,6 +104,7 @@ final class SettingsStore {
     }
 
     private enum Keys {
+        static let notificationsEnabled = "notificationsEnabled"
         static let codexExecutablePath = "codexExecutablePath"
         static let refreshIntervalSeconds = "refreshIntervalSeconds"
         static let deltaThresholdPercentagePoints = "deltaThresholdPercentagePoints"

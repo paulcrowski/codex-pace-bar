@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var service: RateLimitService?
     private var serviceExecutableURL: URL?
     private var refreshTask: Task<Void, Never>?
+    private let notificationController = PaceNotificationController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -130,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             model.apply(window: fetch.selection.window, snapshot: snapshot, debugInfo: fetch.debugInfo)
+            notificationController.notifyIfNeeded(snapshot: snapshot, settings: settings, now: now)
             scheduleResetTimer(for: fetch.selection.window.resetsAt)
         } catch {
             let staleAfterReset = model.snapshot.map { Date() >= $0.resetAt } ?? false
@@ -177,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             thresholds: paceThresholds
         )
         model.applyPaceOnly(snapshot: snapshot)
+        notificationController.notifyIfNeeded(snapshot: snapshot, settings: settings, now: now)
     }
 
     private var paceThresholds: PaceThresholds {
