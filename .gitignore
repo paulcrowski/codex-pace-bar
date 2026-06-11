@@ -5,3 +5,4 @@ SPEC.md
 script/generate_readme_screenshots.swift
 .DS_Store
 *.xcuserstate
+.idea/
