@@ -25,26 +25,19 @@ struct PopoverView: View {
             } else {
                 Text("Reading Codex rate limits...")
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 260)
             }
 
-            Divider()
-
-            HStack {
-                Button("Refresh now", action: onRefresh)
-                    .disabled(model.isRefreshing)
-                Button("Settings", action: onOpenSettings)
-                Spacer()
-                Button("Quit", action: onQuit)
-            }
+            actions
         }
-        .padding(14)
-        .frame(width: 310)
+        .padding(20)
+        .frame(width: 465)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             Image(nsImage: largeBarImage)
-                .frame(width: 260, height: 42)
+                .frame(width: 425, height: 54)
                 .accessibilityLabel(model.displayState.statusTitle)
 
             if model.isRefreshing {
@@ -56,18 +49,68 @@ struct PopoverView: View {
     }
 
     private func metrics(_ snapshot: PaceSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            MetricRow(label: "Used this week", value: percent(snapshot.actualUsedPercent))
-            MetricRow(label: idealByNowLabel(snapshot), value: percent(snapshot.idealUsedPercent))
-            MetricRow(label: "Remaining", value: percent(snapshot.remainingPercent))
-            MetricRow(label: "Resets", value: DateFormatters.resetFormatter.string(from: snapshot.resetAt))
-            MetricRow(label: "Hours to reset", value: hoursToReset(snapshot.resetAt))
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                MetricCard(label: "Used", value: percent(snapshot.actualUsedPercent), color: .blue)
+                MetricCard(label: "Ideal", value: percent(snapshot.idealUsedPercent), color: .red)
+                MetricCard(label: "Remaining", value: percent(snapshot.remainingPercent), color: .gray)
+            }
+
+            StatusCard(title: paceStatus(snapshot), state: snapshot.state, isStale: snapshot.isStale)
+
+            VStack(spacing: 0) {
+                DetailRow(
+                    icon: "clock",
+                    label: "Resets",
+                    value: DateFormatters.resetFormatter.string(from: snapshot.resetAt)
+                )
+
+                Divider()
+                    .padding(.leading, 48)
+
+                DetailRow(
+                    icon: "hourglass",
+                    label: "Hours to reset",
+                    value: hoursToReset(snapshot.resetAt)
+                )
+            }
+            .padding(.horizontal, 16)
+            .background(panelBackground)
 
             if snapshot.isStale {
                 Text("Data may be stale after reset.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var actions: some View {
+        VStack(spacing: 16) {
+            Divider()
+
+            HStack(spacing: 10) {
+                Button(action: onRefresh) {
+                    Label("Refresh now", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isRefreshing)
+
+                Button(action: onOpenSettings) {
+                    Label("Settings", systemImage: "gearshape")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: onQuit) {
+                    Label("Quit", systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .controlSize(.large)
+            .buttonBorderShape(.roundedRectangle(radius: 8))
         }
     }
 
@@ -75,15 +118,22 @@ struct PopoverView: View {
         "\(Int(value.rounded()))%"
     }
 
-    private func idealByNowLabel(_ snapshot: PaceSnapshot) -> String {
-        guard
-            let selectedWindow = model.selectedWindow,
-            let waitHours = PaceCalculator.hoursUntilOnPace(snapshot: snapshot, window: selectedWindow)
-        else {
-            return "Ideal by now"
+    private func paceStatus(_ snapshot: PaceSnapshot) -> String {
+        guard snapshot.state != .onPace else {
+            return "On pace"
         }
 
-        return "Ideal by now (wait \(hours(waitHours)))"
+        let durationHours = (model.selectedWindow?.windowDurationMins ?? 0) / 60
+        let deltaHours = abs(snapshot.deltaPercentagePoints) / 100 * durationHours
+
+        switch snapshot.state {
+        case .abovePace:
+            return "Rushing by \(hours(deltaHours))"
+        case .belowPace:
+            return "Dragging by \(hours(deltaHours))"
+        case .onPace, .loading, .error:
+            return "On pace"
+        }
     }
 
     private func hours(_ value: Double) -> String {
@@ -98,45 +148,150 @@ struct PopoverView: View {
         return self.hours(hours)
     }
 
-    private func color(for state: PaceState, isStale: Bool) -> Color {
-        if isStale {
-            return .gray
-        }
-
-        switch state {
-        case .belowPace:
-            return .green
-        case .onPace:
-            return .blue
-        case .abovePace:
-            return .red
-        case .loading, .error:
-            return .gray
-        }
-    }
-
     private var largeBarImage: NSImage {
-        MenuBarIconRenderer(size: NSSize(width: 260, height: 42)).render(
+        MenuBarIconRenderer(size: NSSize(width: 425, height: 54)).render(
             snapshot: model.snapshot,
             state: model.displayState,
             isStale: model.snapshot?.isStale ?? false,
             colorScheme: settings.barColorScheme
         )
     }
+
+    private var panelBackground: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(.quaternary.opacity(0.5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(.separator.opacity(0.35), lineWidth: 1)
+            }
+    }
 }
 
-private struct MetricRow: View {
+private struct MetricCard: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 9, height: 9)
+
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(value)
+                .font(.system(size: 30, weight: .regular))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.quaternary.opacity(0.5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.separator.opacity(0.35), lineWidth: 1)
+                }
+        }
+    }
+}
+
+private struct StatusCard: View {
+    let title: String
+    let state: PaceState
+    let isStale: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(iconColor.opacity(0.25))
+
+                Image(systemName: iconName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(iconColor)
+            }
+            .frame(width: 34, height: 34)
+
+            Text(title)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.quaternary.opacity(0.5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.separator.opacity(0.35), lineWidth: 1)
+                }
+        }
+    }
+
+    private var iconColor: Color {
+        if isStale {
+            return .gray
+        }
+
+        switch state {
+        case .abovePace:
+            return .blue
+        case .belowPace:
+            return .green
+        case .onPace:
+            return .blue
+        case .loading, .error:
+            return .gray
+        }
+    }
+
+    private var iconName: String {
+        switch state {
+        case .abovePace:
+            return "waveform.path.ecg"
+        case .belowPace:
+            return "arrow.down.right"
+        case .onPace:
+            return "checkmark"
+        case .loading:
+            return "clock"
+        case .error:
+            return "exclamationmark"
+        }
+    }
+}
+
+private struct DetailRow: View {
+    let icon: String
     let label: String
     let value: String
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(.blue)
+                .frame(width: 24)
+
             Text(label)
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
+
             Spacer()
+
             Text(value)
+                .font(.system(size: 14, weight: .semibold))
                 .monospacedDigit()
         }
-        .font(.system(size: 13))
+        .frame(height: 42)
     }
 }

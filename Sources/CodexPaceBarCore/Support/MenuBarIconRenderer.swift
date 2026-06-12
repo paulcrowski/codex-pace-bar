@@ -26,9 +26,9 @@ public final class MenuBarIconRenderer {
         let horizontalPadding: CGFloat = isLarge ? 4 : 2
         let barStartX = horizontalPadding
         let barWidth = size.width - horizontalPadding * 2
-        let gap: CGFloat = isLarge ? 3 : 1.5
+        let gap: CGFloat = isLarge ? 4 : 1.5
         let segmentWidth = (barWidth - CGFloat(segmentCount - 1) * gap) / CGFloat(segmentCount)
-        let segmentHeight = min(max(size.height * 0.55, 9), 24)
+        let segmentHeight = min(max(size.height * 0.55, 9), isLarge ? 40 : 24)
         let segmentY = (size.height - segmentHeight) / 2
 
         let bands = colorBands(snapshot: snapshot, state: state, isStale: isStale, colorScheme: colorScheme)
@@ -37,7 +37,8 @@ public final class MenuBarIconRenderer {
         for index in 0..<segmentCount {
             let x = barStartX + CGFloat(index) * (segmentWidth + gap)
             let rect = NSRect(x: x, y: segmentY, width: segmentWidth, height: segmentHeight)
-            let path = NSBezierPath(rect: rect)
+            let cornerRadius: CGFloat = isLarge ? 6 : 0
+            let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
 
             emptyColor.setFill()
             path.fill()

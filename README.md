@@ -2,7 +2,7 @@
 
 Unofficial macOS menu bar app that shows whether your Codex weekly usage is below pace, on pace, or above pace.
 
-![Codex Pace Bar popover](docs/screenshots/popover.png)
+![Codex Pace Bar popover](docs/screenshots/popover.png?v=2026-06-12)
 
 Codex Pace Bar answers one question at a glance: are you using your weekly Codex limit faster or slower than the current reset window pace?
 
