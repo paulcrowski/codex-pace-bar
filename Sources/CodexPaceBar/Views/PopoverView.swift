@@ -13,7 +13,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if isCodexExecutableMissing {
+            if needsCodexSetup {
                 missingCodexView
             } else if let errorMessage = model.errorMessage {
                 Text("Could not read Codex weekly limit.")
@@ -30,7 +30,7 @@ struct PopoverView: View {
                     .frame(maxWidth: .infinity, minHeight: 260)
             }
 
-            if isCodexExecutableMissing {
+            if needsCodexSetup {
                 missingCodexActions
             } else {
                 actions
@@ -93,11 +93,11 @@ struct PopoverView: View {
 
     private var missingCodexView: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Codex CLI not found")
+            Text("Codex CLI needs setup")
                 .font(.system(size: 24, weight: .semibold))
                 .lineLimit(1)
 
-            Text("Codex Pace Bar needs the `codex` command to read your weekly limit.")
+            Text("Codex Pace Bar needs a working `codex` command to read your weekly limit.")
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -165,11 +165,12 @@ struct PopoverView: View {
         }
     }
 
-    private var isCodexExecutableMissing: Bool {
+    private var needsCodexSetup: Bool {
         guard let errorDescription = PaceError.codexExecutableNotFound.errorDescription else {
             return false
         }
         return model.errorMessage?.contains(errorDescription) == true
+            || model.errorMessage?.contains("App-server exited with status 127.") == true
     }
 
     private func openCodexSetupGuide() {
