@@ -51,8 +51,8 @@ struct PopoverView: View {
     private func metrics(_ snapshot: PaceSnapshot) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
-                MetricCard(label: "Used", value: percent(snapshot.actualUsedPercent), color: .blue)
-                MetricCard(label: "Ideal", value: percent(snapshot.idealUsedPercent), color: .red)
+                MetricCard(label: "Used", value: percent(snapshot.actualUsedPercent), color: usedMetricColor(snapshot))
+                MetricCard(label: "Ideal", value: percent(snapshot.idealUsedPercent), color: .blue)
                 MetricCard(label: "Remaining", value: percent(snapshot.remainingPercent), color: .gray)
             }
 
@@ -116,6 +116,10 @@ struct PopoverView: View {
 
     private func percent(_ value: Double) -> String {
         "\(Int(value.rounded()))%"
+    }
+
+    private func usedMetricColor(_ snapshot: PaceSnapshot) -> Color {
+        snapshot.deltaPercentagePoints > 0 ? .red : .green
     }
 
     private func paceStatus(_ snapshot: PaceSnapshot) -> String {
