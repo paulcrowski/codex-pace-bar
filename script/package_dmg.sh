@@ -119,6 +119,11 @@ fi
 
 create_dmg
 
+if [[ -n "$SIGNING_IDENTITY" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+  codesign --verify --verbose=2 "$DMG_PATH"
+fi
+
 if [[ "$NOTARIZE" == "1" ]]; then
   notarize "$DMG_PATH"
   xcrun stapler staple "$DMG_PATH"
