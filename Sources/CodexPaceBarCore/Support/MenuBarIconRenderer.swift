@@ -37,8 +37,7 @@ public final class MenuBarIconRenderer {
         for index in 0..<segmentCount {
             let x = barStartX + CGFloat(index) * (segmentWidth + gap)
             let rect = NSRect(x: x, y: segmentY, width: segmentWidth, height: segmentHeight)
-            let cornerRadius: CGFloat = isLarge ? 6 : 0
-            let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+            let path = NSBezierPath(rect: rect)
 
             emptyColor.setFill()
             path.fill()
