@@ -6,6 +6,7 @@ DISPLAY_NAME="Codex Pace Bar"
 BUNDLE_ID="app.codexpacebar.macos"
 MIN_SYSTEM_VERSION="15.0"
 DMG_NAME="CodexPaceBar.dmg"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -63,7 +64,11 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+if [[ -n "$SIGNING_IDENTITY" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP_BUNDLE"
+else
+  codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
 cp -R "$APP_BUNDLE" "$DMG_ROOT/"

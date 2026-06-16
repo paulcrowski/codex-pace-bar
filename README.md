@@ -2,7 +2,11 @@
 
 Unofficial macOS menu bar app that shows whether your Codex weekly usage is below pace, on pace, or above pace.
 
-![Codex Pace Bar popover](docs/screenshots/popover.png?v=2026-06-12)
+## Download
+
+**[Download the latest ready build for macOS](https://github.com/awronski/codex-pace-bar/releases/latest/download/CodexPaceBar.dmg)**
+
+![Codex Pace Bar popover](docs/screenshots/popover.png?v=2026-06-16)
 
 Codex Pace Bar answers one question at a glance: are you using your weekly Codex limit faster or slower than the current reset window pace?
 
@@ -14,20 +18,24 @@ Codex Pace Bar answers one question at a glance: are you using your weekly Codex
 
 ## Status
 
-This is an early local-first app. The local package script ad-hoc signs the app bundle, but releases are not Developer ID signed or notarized yet.
+Ready DMG builds are available from GitHub Releases. The package script ad-hoc signs local builds by default and can use a Developer ID signing identity for release builds.
 
-The Codex app-server API is experimental and may change. If the rate-limit response shape changes, this app may need updates.
+Notarization is the remaining release step for smoother first launch on other Macs. The app also depends on Codex's local app-server API, so future Codex CLI changes may require an app update.
 
 ## Requirements
 
+### To Run
+
 - macOS 15.0 or newer.
-- Swift 6 toolchain / Xcode command line build tools.
 - [Codex CLI](https://developers.openai.com/codex/cli) installed and already logged in.
-- A Codex app-server that supports `codex app-server --listen stdio://`.
 
 Codex Pace Bar starts the local Codex app-server through the Codex CLI. By default it looks for `codex` on your `PATH`, then checks common install locations such as `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`, `~/.local/bin/codex`, mise-managed `npm-openai-codex` installs, `~/.npm-global/bin/codex`, and `~/.bun/bin/codex`.
 
 If your Codex CLI is installed somewhere else, set the exact executable path in Settings.
+
+### To Build
+
+- Swift 6 toolchain / Xcode command line build tools.
 
 ## What It Shows
 
@@ -73,15 +81,21 @@ Depending on your local Swift toolchain setup, `DEVELOPER_DIR` may not be needed
 
 ## Package DMG
 
-Create a local ad-hoc-signed DMG for GitHub Releases:
+Create a local ad-hoc-signed DMG:
 
 ```bash
 ./script/package_dmg.sh
 ```
 
-The script builds the app in release mode, ad-hoc signs the app bundle, and writes `dist/CodexPaceBar.dmg`.
+Create a Developer ID-signed DMG for release:
 
-Ad-hoc signing is enough to seal the local app bundle, but it is not a substitute for Apple Developer ID signing and notarization. Public downloads may still show Gatekeeper warnings until release builds are Developer ID signed and notarized.
+```bash
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/package_dmg.sh
+```
+
+The script builds the app in release mode, signs the app bundle, and writes `dist/CodexPaceBar.dmg`.
+
+Ad-hoc signing is enough to seal the local app bundle, but it is not a substitute for Apple Developer ID signing and notarization. Public downloads may still show Gatekeeper warnings until release builds are notarized.
 
 ## Privacy
 
@@ -107,8 +121,7 @@ Codex, OpenAI, and related names are trademarks or registered trademarks of thei
 - The app depends on Codex's local app-server interface.
 - The app-server API is experimental.
 - The app currently targets macOS 15.0+.
-- Release builds are ad-hoc signed only, not Developer ID signed or notarized.
-- Public downloads may require an explicit Gatekeeper override until notarized release builds are available.
+- Release builds need notarization before public downloads avoid Gatekeeper warnings.
 
 ## License
 
