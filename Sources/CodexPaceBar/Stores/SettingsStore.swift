@@ -92,7 +92,7 @@ final class SettingsStore {
         let storedThreshold = defaults.object(forKey: Keys.deltaThresholdPercentagePoints) as? Int ?? Self.defaultDeltaThreshold
         self.deltaThresholdPercentagePoints = Self.clampDeltaThreshold(storedThreshold)
         let storedColorScheme = defaults.string(forKey: Keys.barColorScheme)
-        self.barColorScheme = storedColorScheme.flatMap(BarColorScheme.init(rawValue:)) ?? .statusColor
+        self.barColorScheme = storedColorScheme.flatMap(BarColorScheme.init(rawValue:)) ?? .paceComparison
     }
 
     private static func clampRefreshInterval(_ value: Int) -> Int {
