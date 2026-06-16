@@ -7,6 +7,8 @@ BUNDLE_ID="app.codexpacebar.macos"
 MIN_SYSTEM_VERSION="15.0"
 DMG_NAME="CodexPaceBar.dmg"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+NOTARIZE="${NOTARIZE:-0}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -19,6 +21,7 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/Resources/AppIcon.icns"
 DMG_ROOT="$DIST_DIR/dmg-root"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
+APP_ZIP="$DIST_DIR/$APP_NAME-notary.zip"
 
 cd "$ROOT_DIR"
 
@@ -26,11 +29,45 @@ if [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Developer"
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
+if [[ "$NOTARIZE" == "1" ]]; then
+  if [[ -z "$SIGNING_IDENTITY" ]]; then
+    echo "NOTARIZE=1 requires SIGNING_IDENTITY." >&2
+    exit 1
+  fi
+
+  if [[ -z "$NOTARY_PROFILE" ]]; then
+    echo "NOTARIZE=1 requires NOTARY_PROFILE." >&2
+    exit 1
+  fi
+fi
+
+notarize() {
+  local artifact="$1"
+
+  xcrun notarytool submit "$artifact" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait
+}
+
+create_dmg() {
+  rm -rf "$DMG_ROOT" "$DMG_PATH"
+  mkdir -p "$DMG_ROOT"
+  cp -R "$APP_BUNDLE" "$DMG_ROOT/"
+  ln -s /Applications "$DMG_ROOT/Applications"
+
+  hdiutil create \
+    -volname "$DISPLAY_NAME" \
+    -srcfolder "$DMG_ROOT" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH"
+}
+
 swift build -c release --product "$APP_NAME"
 BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
 
-rm -rf "$APP_BUNDLE" "$DMG_ROOT" "$DMG_PATH"
-mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$DMG_ROOT"
+rm -rf "$APP_BUNDLE" "$DMG_ROOT" "$DMG_PATH" "$APP_ZIP"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/AppIcon.icns"
 chmod +x "$APP_BINARY"
@@ -71,14 +108,21 @@ else
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
-cp -R "$APP_BUNDLE" "$DMG_ROOT/"
-ln -s /Applications "$DMG_ROOT/Applications"
+if [[ "$NOTARIZE" == "1" ]]; then
+  ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
+  notarize "$APP_ZIP"
+  xcrun stapler staple "$APP_BUNDLE"
+  xcrun stapler validate "$APP_BUNDLE"
+  spctl -a -vvv -t exec "$APP_BUNDLE"
+  rm -f "$APP_ZIP"
+fi
 
-hdiutil create \
-  -volname "$DISPLAY_NAME" \
-  -srcfolder "$DMG_ROOT" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH"
+create_dmg
+
+if [[ "$NOTARIZE" == "1" ]]; then
+  notarize "$DMG_PATH"
+  xcrun stapler staple "$DMG_PATH"
+  xcrun stapler validate "$DMG_PATH"
+fi
 
 echo "$DMG_PATH"

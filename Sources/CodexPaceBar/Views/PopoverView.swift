@@ -13,7 +13,9 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if let errorMessage = model.errorMessage {
+            if isCodexExecutableMissing {
+                missingCodexView
+            } else if let errorMessage = model.errorMessage {
                 Text("Could not read Codex weekly limit.")
                     .font(.headline)
                 Text(errorMessage)
@@ -28,7 +30,11 @@ struct PopoverView: View {
                     .frame(maxWidth: .infinity, minHeight: 260)
             }
 
-            actions
+            if isCodexExecutableMissing {
+                missingCodexActions
+            } else {
+                actions
+            }
         }
         .padding(20)
         .frame(width: 465)
@@ -85,6 +91,28 @@ struct PopoverView: View {
         }
     }
 
+    private var missingCodexView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Codex CLI not found")
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(1)
+
+            Text("Codex Pace Bar needs the `codex` command to read your weekly limit.")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: openCodexSetupGuide) {
+                Label("Codex setup guide", systemImage: "book")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .buttonBorderShape(.roundedRectangle(radius: 8))
+        }
+        .padding(.top, 112)
+        .padding(.bottom, 22)
+    }
+
     private var actions: some View {
         VStack(spacing: 16) {
             Divider()
@@ -111,6 +139,69 @@ struct PopoverView: View {
             }
             .controlSize(.large)
             .buttonBorderShape(.roundedRectangle(radius: 8))
+        }
+    }
+
+    private var missingCodexActions: some View {
+        VStack(spacing: 16) {
+            Divider()
+
+            HStack(spacing: 14) {
+                Button(action: chooseCodexPath) {
+                    Label("Choose codex path", systemImage: "folder.badge.questionmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: onRefresh) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isRefreshing)
+            }
+            .controlSize(.large)
+            .buttonBorderShape(.roundedRectangle(radius: 8))
+        }
+    }
+
+    private var isCodexExecutableMissing: Bool {
+        guard let errorDescription = PaceError.codexExecutableNotFound.errorDescription else {
+            return false
+        }
+        return model.errorMessage?.contains(errorDescription) == true
+    }
+
+    private func openCodexSetupGuide() {
+        guard let url = URL(string: "https://developers.openai.com/codex/cli") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func chooseCodexPath() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose codex executable"
+        panel.prompt = "Choose"
+        panel.message = "Select the codex command-line executable."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        panel.showsHiddenFiles = true
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        if FileManager.default.isExecutableFile(atPath: url.path) {
+            settings.codexExecutablePath = url.path
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Selected file is not executable."
+            alert.informativeText = "Choose the real codex command file."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 

@@ -2,6 +2,7 @@
 dist/
 .codex/
 SPEC.md
+SIGN.md
 script/generate_readme_screenshots.swift
 .DS_Store
 *.xcuserstate
