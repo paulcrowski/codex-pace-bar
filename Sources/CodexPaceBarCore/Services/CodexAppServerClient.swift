@@ -28,7 +28,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
                 "clientInfo": .object([
                     "name": .string("codex_pace_bar"),
                     "title": .string("Codex Pace Bar"),
-                    "version": .string("0.1.0")
+                    "version": .string(Self.clientVersion)
                 ]),
                 "capabilities": .object([
                     "experimentalApi": .bool(true)
@@ -260,5 +260,9 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         for continuation in pending.values {
             continuation.resume(throwing: error)
         }
+    }
+
+    private static var clientVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
     }
 }
