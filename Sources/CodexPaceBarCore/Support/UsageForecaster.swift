@@ -1,7 +1,9 @@
 import Foundation
 
 public enum UsageForecaster {
-    public static let minimumHistoryDuration: TimeInterval = 60 * 60
+    public static let minimumSampleCount = 3
+    public static let minimumHistoryDuration: TimeInterval = 30 * 60
+    public static let minimumUsageChange = 1.0
     public static let lookbackDuration: TimeInterval = 24 * 60 * 60
 
     public static func forecast(samples: [UsageSample], now: Date) -> UsageForecast? {
@@ -24,7 +26,7 @@ public enum UsageForecaster {
             .sorted { $0.timestamp < $1.timestamp }
 
         guard let first = currentWindowSamples.first,
-              currentWindowSamples.count >= 2
+              currentWindowSamples.count >= minimumSampleCount
         else {
             return nil
         }
@@ -36,6 +38,10 @@ public enum UsageForecaster {
 
         let historyHours = historyDuration / 3600
         let consumedPercentagePoints = latest.usedPercent - first.usedPercent
+        guard consumedPercentagePoints >= minimumUsageChange else {
+            return nil
+        }
+
         let rate = consumedPercentagePoints / historyHours
         guard rate.isFinite, rate > 0 else {
             return nil

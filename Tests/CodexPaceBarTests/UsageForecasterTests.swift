@@ -10,6 +10,7 @@ struct UsageForecasterTests {
         let resetAt = now.addingTimeInterval(20 * 60 * 60)
         let samples = [
             sample(at: now.addingTimeInterval(-2 * 60 * 60), used: 40, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-60 * 60), used: 45, resetAt: resetAt),
             sample(at: now, used: 50, resetAt: resetAt)
         ]
 
@@ -26,6 +27,7 @@ struct UsageForecasterTests {
         let resetAt = now.addingTimeInterval(2 * 60 * 60)
         let samples = [
             sample(at: now.addingTimeInterval(-2 * 60 * 60), used: 40, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-60 * 60), used: 45, resetAt: resetAt),
             sample(at: now, used: 50, resetAt: resetAt)
         ]
 
@@ -35,7 +37,7 @@ struct UsageForecasterTests {
     }
 
     @Test
-    func requiresAtLeastOneHourOfHistory() {
+    func requiresAtLeastThreeSamples() {
         let now = Date(timeIntervalSince1970: 100_000)
         let resetAt = now.addingTimeInterval(20 * 60 * 60)
         let samples = [
@@ -47,12 +49,26 @@ struct UsageForecasterTests {
     }
 
     @Test
-    func ignoresFlatUsage() {
+    func requiresAtLeastThirtyMinutesOfHistory() {
         let now = Date(timeIntervalSince1970: 100_000)
         let resetAt = now.addingTimeInterval(20 * 60 * 60)
         let samples = [
-            sample(at: now.addingTimeInterval(-2 * 60 * 60), used: 50, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-29 * 60), used: 40, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-15 * 60), used: 45, resetAt: resetAt),
             sample(at: now, used: 50, resetAt: resetAt)
+        ]
+
+        #expect(UsageForecaster.forecast(samples: samples, now: now) == nil)
+    }
+
+    @Test
+    func requiresAtLeastOnePercentagePointOfChange() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let resetAt = now.addingTimeInterval(20 * 60 * 60)
+        let samples = [
+            sample(at: now.addingTimeInterval(-60 * 60), used: 50, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-30 * 60), used: 50.4, resetAt: resetAt),
+            sample(at: now, used: 50.9, resetAt: resetAt)
         ]
 
         #expect(UsageForecaster.forecast(samples: samples, now: now) == nil)
