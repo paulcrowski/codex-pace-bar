@@ -14,6 +14,15 @@ public enum PaceError: Error, Equatable, LocalizedError, Sendable {
     case invalidRateLimitSchema(String)
     case staleAfterReset(String)
 
+    public var requiresCodexSetup: Bool {
+        switch self {
+        case .codexExecutableNotFound, .appServerExited(127):
+            return true
+        default:
+            return false
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .codexExecutableNotFound:

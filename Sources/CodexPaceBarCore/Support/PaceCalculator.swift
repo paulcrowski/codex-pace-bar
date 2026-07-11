@@ -74,20 +74,6 @@ public enum PaceCalculator {
         }
     }
 
-    public static func hoursUntilOnPace(snapshot: PaceSnapshot, window: CodexLimitWindow) -> Double? {
-        guard snapshot.deltaPercentagePoints > 0 else {
-            return nil
-        }
-
-        let durationHours = window.windowDurationMins / 60
-        guard durationHours.isFinite, durationHours > 0 else {
-            return nil
-        }
-
-        let hours = snapshot.deltaPercentagePoints / 100 * durationHours
-        return hours.isFinite ? hours : nil
-    }
-
     private static func initialState(delta: Double, thresholds: PaceThresholds) -> PaceState {
         if delta <= -thresholds.deltaPercentagePoints {
             return .belowPace

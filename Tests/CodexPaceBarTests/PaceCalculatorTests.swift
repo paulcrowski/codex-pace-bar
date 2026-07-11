@@ -52,39 +52,6 @@ struct PaceCalculatorTests {
         #expect(snapshot(used: 90, now: now, resetAt: resetAt, isStale: true).isStale)
     }
 
-    @Test
-    func hoursUntilOnPaceUsesWeeklyPaceRate() {
-        let resetAt = Date(timeIntervalSince1970: 7 * 24 * 60 * 60)
-        let halfway = resetAt.addingTimeInterval(-3.5 * 24 * 60 * 60)
-        let current = snapshot(used: 60, now: halfway, resetAt: resetAt)
-        let window = CodexLimitWindow(
-            limitId: "codex",
-            source: "test",
-            usedPercent: 60,
-            windowDurationMins: 10080,
-            resetsAt: resetAt
-        )
-
-        let hours = PaceCalculator.hoursUntilOnPace(snapshot: current, window: window)
-        #expect(abs((hours ?? 0) - 16.8) < 0.001)
-    }
-
-    @Test
-    func hoursUntilOnPaceIsOnlyShownWhenOverspent() {
-        let resetAt = Date(timeIntervalSince1970: 7 * 24 * 60 * 60)
-        let halfway = resetAt.addingTimeInterval(-3.5 * 24 * 60 * 60)
-        let current = snapshot(used: 50, now: halfway, resetAt: resetAt)
-        let window = CodexLimitWindow(
-            limitId: "codex",
-            source: "test",
-            usedPercent: 50,
-            windowDurationMins: 10080,
-            resetsAt: resetAt
-        )
-
-        #expect(PaceCalculator.hoursUntilOnPace(snapshot: current, window: window) == nil)
-    }
-
     private func snapshot(used: Double, now: Date, resetAt: Date, isStale: Bool = false) -> PaceSnapshot {
         let window = CodexLimitWindow(
             limitId: "codex",

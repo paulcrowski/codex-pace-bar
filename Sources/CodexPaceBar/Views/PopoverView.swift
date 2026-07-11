@@ -1,10 +1,12 @@
 import CodexPaceBarCore
 import AppKit
+import Charts
 import SwiftUI
 
 struct PopoverView: View {
     let model: AppModel
     let settings: SettingsStore
+    let history: UsageHistoryStore
     let onRefresh: () -> Void
     let onOpenSettings: () -> Void
     let onQuit: () -> Void
@@ -15,15 +17,17 @@ struct PopoverView: View {
 
             if needsCodexSetup {
                 missingCodexView
-            } else if let errorMessage = model.errorMessage {
+            } else if let failure = model.failure {
                 Text("Could not read Codex weekly limit.")
                     .font(.headline)
-                Text(errorMessage)
+                Text(failure.message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let snapshot = model.snapshot {
-                metrics(snapshot)
+                ScrollView(.vertical, showsIndicators: false) {
+                    metrics(snapshot)
+                }
             } else {
                 Text("Reading Codex rate limits...")
                     .foregroundStyle(.secondary)
@@ -37,7 +41,7 @@ struct PopoverView: View {
             }
         }
         .padding(20)
-        .frame(width: 465)
+        .frame(width: 465, height: 650)
     }
 
     private var header: some View {
@@ -62,7 +66,14 @@ struct PopoverView: View {
                 MetricCard(label: "Remaining", value: percent(snapshot.remainingPercent), color: .gray)
             }
 
-            StatusCard(title: paceStatus(snapshot), state: snapshot.state, isStale: snapshot.isStale)
+            StatusCard(
+                title: paceStatus(snapshot),
+                subtitle: forecastStatus,
+                state: snapshot.state,
+                isStale: snapshot.isStale
+            )
+
+            usageChart
 
             VStack(spacing: 0) {
                 DetailRow(
@@ -166,11 +177,7 @@ struct PopoverView: View {
     }
 
     private var needsCodexSetup: Bool {
-        guard let errorDescription = PaceError.codexExecutableNotFound.errorDescription else {
-            return false
-        }
-        return model.errorMessage?.contains(errorDescription) == true
-            || model.errorMessage?.contains("App-server exited with status 127.") == true
+        model.failure?.requiresCodexSetup == true
     }
 
     private func openCodexSetupGuide() {
@@ -244,6 +251,130 @@ struct PopoverView: View {
         return self.hours(hours)
     }
 
+    private var forecastStatus: String? {
+        guard let forecast = model.forecast else {
+            return nil
+        }
+
+        if forecast.willRunOutBeforeReset {
+            return "Forecast: may run out in \(hours(forecast.hoursUntilExhaustion(at: Date())))"
+        }
+
+        return "Forecast: current rate should last until reset"
+    }
+
+    private var usageChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Weekly limit usage (%)")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Spacer()
+
+                Text("Current weekly window")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Chart {
+                ForEach(history.samples, id: \.timestamp) { sample in
+                    LineMark(
+                        x: .value("Time", sample.timestamp),
+                        y: .value("Used", sample.usedPercent),
+                        series: .value("Series", "Actual")
+                    )
+                    .foregroundStyle(by: .value("Series", "Actual"))
+                    .interpolationMethod(.linear)
+                }
+
+                ForEach(idealChartPoints) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Ideal", point.value),
+                        series: .value("Series", "Ideal")
+                    )
+                    .foregroundStyle(by: .value("Series", "Ideal"))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
+
+                ForEach(forecastChartPoints) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Forecast", point.value),
+                        series: .value("Series", "Forecast")
+                    )
+                    .foregroundStyle(by: .value("Series", "Forecast"))
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
+                }
+
+                if let latest = history.samples.last {
+                    PointMark(
+                        x: .value("Time", latest.timestamp),
+                        y: .value("Used", latest.usedPercent)
+                    )
+                    .foregroundStyle(by: .value("Series", "Actual"))
+                }
+            }
+            .chartForegroundStyleScale([
+                "Actual": Color.blue,
+                "Ideal": Color.gray,
+                "Forecast": Color.orange
+            ])
+            .chartLegend(.hidden)
+            .chartYScale(domain: 0...100)
+            .chartYAxis {
+                AxisMarks(position: .leading, values: [0, 50, 100]) {
+                    AxisGridLine()
+                    AxisValueLabel()
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) {
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated).hour())
+                }
+            }
+            .frame(height: 145)
+
+            HStack(spacing: 14) {
+                ChartLegendItem(label: "Actual", color: .blue)
+                ChartLegendItem(label: "Ideal pace", color: .gray)
+                ChartLegendItem(
+                    label: model.forecast == nil ? "Forecast pending" : "Forecast",
+                    color: model.forecast == nil ? .orange.opacity(0.4) : .orange
+                )
+            }
+        }
+        .padding(12)
+        .background(panelBackground)
+    }
+
+    private var idealChartPoints: [UsageChartPoint] {
+        guard let window = model.selectedWindow else {
+            return []
+        }
+
+        let start = window.resetsAt.addingTimeInterval(-window.windowDurationMins * 60)
+        return [
+            UsageChartPoint(id: "ideal-start", date: start, value: 0),
+            UsageChartPoint(id: "ideal-end", date: window.resetsAt, value: 100)
+        ]
+    }
+
+    private var forecastChartPoints: [UsageChartPoint] {
+        guard let latest = history.samples.last, let forecast = model.forecast else {
+            return []
+        }
+
+        let end = min(forecast.exhaustionAt, forecast.resetAt)
+        let forecastHours = max(0, end.timeIntervalSince(latest.timestamp) / 3600)
+        let endValue = min(100, latest.usedPercent + forecast.ratePercentagePointsPerHour * forecastHours)
+        return [
+            UsageChartPoint(id: "forecast-start", date: latest.timestamp, value: latest.usedPercent),
+            UsageChartPoint(id: "forecast-end", date: end, value: endValue)
+        ]
+    }
+
     private var largeBarImage: NSImage {
         MenuBarIconRenderer(size: NSSize(width: 425, height: 54)).render(
             snapshot: model.snapshot,
@@ -260,6 +391,28 @@ struct PopoverView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(.separator.opacity(0.35), lineWidth: 1)
             }
+    }
+}
+
+private struct UsageChartPoint: Identifiable {
+    let id: String
+    let date: Date
+    let value: Double
+}
+
+private struct ChartLegendItem: View {
+    let label: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -299,6 +452,7 @@ private struct MetricCard: View {
 
 private struct StatusCard: View {
     let title: String
+    let subtitle: String?
     let state: PaceState
     let isStale: Bool
 
@@ -314,10 +468,19 @@ private struct StatusCard: View {
             }
             .frame(width: 34, height: 34)
 
-            Text(title)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
 
             Spacer()
         }

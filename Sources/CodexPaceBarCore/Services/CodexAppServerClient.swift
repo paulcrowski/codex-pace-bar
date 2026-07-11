@@ -1,11 +1,11 @@
 import Foundation
 
-public actor CodexAppServerClient {
+public actor CodexAppServerClient: CodexAppServerRequesting {
     private let executableURL: URL
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
-    private var stderrBuffer = Data()
+    private var stderrPipe: Pipe?
     private var decoder = JsonRpcLineDecoder()
     private var initialized = false
     private var nextRequestID = 1
@@ -46,8 +46,9 @@ public actor CodexAppServerClient {
         return try await sendRequest(method: method, params: params, timeoutSeconds: timeoutSeconds)
     }
 
-    public func shutdown() {
+    public func shutdown() async {
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        stderrPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminationHandler = nil
         if process?.isRunning == true {
             process?.terminate()
@@ -55,6 +56,7 @@ public actor CodexAppServerClient {
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
+        stderrPipe = nil
         initialized = false
         failPending(PaceError.appServerExited(nil))
     }
@@ -66,7 +68,6 @@ public actor CodexAppServerClient {
 
         initialized = false
         decoder = JsonRpcLineDecoder()
-        stderrBuffer = Data()
 
         let process = Process()
         let stdinPipe = Pipe()
@@ -87,12 +88,8 @@ public actor CodexAppServerClient {
             Task { await self?.receive(data) }
         }
 
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else {
-                return
-            }
-            Task { await self?.appendStderr(data) }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            _ = handle.availableData
         }
 
         process.terminationHandler = { [weak self] process in
@@ -108,6 +105,7 @@ public actor CodexAppServerClient {
         self.process = process
         self.stdinPipe = stdinPipe
         self.stdoutPipe = stdoutPipe
+        self.stderrPipe = stderrPipe
     }
 
     private func sendRequest(method: String, params: JSONValue?, timeoutSeconds: TimeInterval) async throws -> JSONValue {
@@ -115,36 +113,25 @@ public actor CodexAppServerClient {
         nextRequestID += 1
 
         return try await withTimeout(seconds: timeoutSeconds, operationName: method) { [self] in
-            try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { continuation in
-                    Task {
-                        await self.registerAndWriteRequest(
-                            id: id,
-                            method: method,
-                            params: params,
-                            continuation: continuation
-                        )
-                    }
-                }
-            } onCancel: {
-                Task { await self.cancelPendingRequest(id) }
-            }
+            try await performRequest(id: id, method: method, params: params)
         }
     }
 
-    private func registerAndWriteRequest(
-        id: Int,
-        method: String,
-        params: JSONValue?,
-        continuation: CheckedContinuation<JSONValue, Error>
-    ) {
-        pending[id] = continuation
+    private func performRequest(id: Int, method: String, params: JSONValue?) async throws -> JSONValue {
+        try Task.checkCancellation()
 
-        do {
-            try writeRequest(id: id, method: method, params: params)
-        } catch {
-            pending.removeValue(forKey: id)
-            continuation.resume(throwing: error)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation(isolation: self) { continuation in
+                pending[id] = continuation
+                do {
+                    try writeRequest(id: id, method: method, params: params)
+                } catch {
+                    pending.removeValue(forKey: id)
+                    continuation.resume(throwing: error)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelPendingRequest(id) }
         }
     }
 
@@ -208,7 +195,11 @@ public actor CodexAppServerClient {
 
         var line = data
         line.append(0x0A)
-        stdinPipe.fileHandleForWriting.write(line)
+        do {
+            try stdinPipe.fileHandleForWriting.write(contentsOf: line)
+        } catch {
+            throw PaceError.appServerWriteFailed
+        }
     }
 
     private func receive(_ data: Data) {
@@ -217,8 +208,8 @@ public actor CodexAppServerClient {
             switch result {
             case let .success(message):
                 handle(message)
-            case .failure:
-                continue
+            case let .failure(error):
+                failPending(PaceError.jsonDecodingFailed(error.message))
             }
         }
     }
@@ -246,25 +237,20 @@ public actor CodexAppServerClient {
         continuation.resume(returning: object["result"] ?? .null)
     }
 
-    private func appendStderr(_ data: Data) {
-        stderrBuffer.append(data)
-        if stderrBuffer.count > 16_384 {
-            stderrBuffer.removeFirst(stderrBuffer.count - 16_384)
-        }
-    }
-
     private func handleTermination(status: Int32) {
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        stderrPipe?.fileHandleForReading.readabilityHandler = nil
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
+        stderrPipe = nil
         initialized = false
         failPending(PaceError.appServerExited(status))
     }
 
     private func cancelPendingRequest(_ id: Int) {
         if let continuation = pending.removeValue(forKey: id) {
-            continuation.resume(throwing: PaceError.appServerTimeout("request \(id)"))
+            continuation.resume(throwing: CancellationError())
         }
     }
 

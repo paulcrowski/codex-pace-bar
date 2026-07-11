@@ -3,13 +3,31 @@ import CodexPaceBarCore
 
 struct SettingsView: View {
     @Bindable var settings: SettingsStore
+    @Bindable var launchAtLogin: LaunchAtLoginController
 
     var body: some View {
         VStack(spacing: 0) {
             SettingsRow(
+                icon: "power",
+                title: "Launch at login",
+                subtitle: launchAtLogin.statusMessage ?? "Open Codex Pace Bar after signing in"
+            ) {
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { launchAtLogin.isEnabled },
+                        set: { launchAtLogin.setEnabled($0) }
+                    )
+                )
+                .labelsHidden()
+            }
+
+            SettingsDivider()
+
+            SettingsRow(
                 icon: "bell",
-                title: "Notify when usage is well above pace",
-                subtitle: "Uses 2x the pace delta; maximum once per day."
+                title: "Usage notifications",
+                subtitle: "Warns about high pace or forecast exhaustion; maximum once per day."
             ) {
                 Toggle("", isOn: $settings.notificationsEnabled)
                     .labelsHidden()
@@ -71,7 +89,7 @@ struct SettingsView: View {
         .padding(.horizontal, 24)
         .padding(.top, 28)
         .padding(.bottom, 24)
-        .frame(width: 620, height: 420)
+        .frame(width: 620, height: 520)
         .background {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)

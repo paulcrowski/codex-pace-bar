@@ -44,6 +44,8 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 - A vertical pace marker based on exact elapsed time in the current reset window.
 - A popover with used, ideal, remaining, reset time, and hours until reset.
 - If usage is above pace, the popover shows how long to wait for the ideal pace to catch up.
+- A chart of usage percentage during the current weekly window.
+- A run-out forecast based on at least one hour of recent local usage history.
 
 ![Codex Pace Bar menu bar item](docs/screenshots/menu-bar.png)
 
@@ -57,9 +59,12 @@ Settings are intentionally small:
 - Refresh interval.
 - Pace delta threshold.
 - Daily notification when usage is well above pace.
+- Forecast notification when recent usage indicates the weekly limit may run out before reset.
+- Launch at login, enabled by default and configurable in Settings.
 - Bar color scheme.
 
 Settings are stored in `UserDefaults`.
+Usage history is stored locally in Application Support and is automatically replaced when the weekly window resets.
 
 ## Build And Run
 
@@ -107,6 +112,7 @@ Codex Pace Bar is local-only.
 - No network calls from this app.
 - No OpenAI credentials are requested or stored.
 - Account and rate-limit data is read only through the local Codex app-server using your existing Codex session.
+- Usage history contains timestamps, percentage used, and reset metadata for the current weekly window only.
 
 Debug information is redacted and limited to operational details such as selected executable path, app-server status, detected window durations, percentage values, reset timestamp presence, errors, and timestamps.
 
@@ -122,6 +128,7 @@ Codex, OpenAI, and related names are trademarks or registered trademarks of thei
 - The app-server API is experimental.
 - The app currently targets macOS 15.0+.
 - Release builds need notarization before public downloads avoid Gatekeeper warnings.
+- Forecasts use percentage-based usage history because the app-server rate-limit response does not provide raw token spending totals.
 
 ## License
 

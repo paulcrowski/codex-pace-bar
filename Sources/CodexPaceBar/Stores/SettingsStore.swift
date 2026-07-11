@@ -5,6 +5,13 @@ import Observation
 @MainActor
 @Observable
 final class SettingsStore {
+    enum Change {
+        case codexExecutable
+        case refreshInterval
+        case paceThreshold
+        case display
+    }
+
     static let minimumRefreshInterval = 60
     static let defaultRefreshInterval = 300
     static let maximumRefreshInterval = 3600
@@ -27,7 +34,7 @@ final class SettingsStore {
                 return
             }
             defaults.set(codexExecutablePath, forKey: Keys.codexExecutablePath)
-            onChange?()
+            onChange?(.codexExecutable)
         }
     }
 
@@ -42,7 +49,7 @@ final class SettingsStore {
                 return
             }
             defaults.set(refreshIntervalSeconds, forKey: Keys.refreshIntervalSeconds)
-            onChange?()
+            onChange?(.refreshInterval)
         }
     }
 
@@ -57,7 +64,7 @@ final class SettingsStore {
                 return
             }
             defaults.set(deltaThresholdPercentagePoints, forKey: Keys.deltaThresholdPercentagePoints)
-            onPaceThresholdChange?()
+            onChange?(.paceThreshold)
         }
     }
 
@@ -67,7 +74,7 @@ final class SettingsStore {
                 return
             }
             defaults.set(barColorScheme.rawValue, forKey: Keys.barColorScheme)
-            onDisplayChange?()
+            onChange?(.display)
         }
     }
 
@@ -75,13 +82,7 @@ final class SettingsStore {
     private let defaults: UserDefaults
 
     @ObservationIgnored
-    var onChange: (() -> Void)?
-
-    @ObservationIgnored
-    var onPaceThresholdChange: (() -> Void)?
-
-    @ObservationIgnored
-    var onDisplayChange: (() -> Void)?
+    var onChange: ((Change) -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

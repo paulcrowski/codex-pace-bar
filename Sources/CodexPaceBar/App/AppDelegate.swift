@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = SettingsStore()
+    private let history = UsageHistoryStore()
+    private let launchAtLogin = LaunchAtLoginController()
     private lazy var model = AppModel()
     private var statusBarController: StatusBarController?
     private var settingsWindowController: SettingsWindowController?
@@ -14,28 +16,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var service: RateLimitService?
     private var serviceExecutableURL: URL?
     private var refreshTask: Task<Void, Never>?
+    private var refreshRequested = false
     private let notificationController = PaceNotificationController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        settingsWindowController = SettingsWindowController(settings: settings)
+        settingsWindowController = SettingsWindowController(
+            settings: settings,
+            launchAtLogin: launchAtLogin
+        )
         statusBarController = StatusBarController(
             model: model,
             settings: settings,
+            history: history,
             onRefresh: { [weak self] in self?.refreshNow() },
             onOpenSettings: { [weak self] in self?.settingsWindowController?.show() },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
 
-        settings.onChange = { [weak self] in
-            self?.settingsDidChange()
-        }
-        settings.onPaceThresholdChange = { [weak self] in
-            self?.recalculatePaceOrRefresh(resetHysteresis: true)
-        }
-        settings.onDisplayChange = { [weak self] in
-            self?.model.onChange?()
+        settings.onChange = { [weak self] change in
+            self?.settingsDidChange(change)
         }
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -53,21 +54,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer?.invalidate()
         markerTimer?.invalidate()
         resetTimer?.invalidate()
+        refreshRequested = false
         refreshTask?.cancel()
         if let service {
             Task { await service.shutdown() }
         }
     }
 
-    private func settingsDidChange() {
-        refreshTimer?.invalidate()
-        scheduleTimers()
-        serviceExecutableURL = nil
-        if let service {
-            Task { await service.shutdown() }
+    private func settingsDidChange(_ change: SettingsStore.Change) {
+        switch change {
+        case .codexExecutable:
+            refreshTask?.cancel()
+            invalidateService()
+            refreshNow()
+        case .refreshInterval:
+            scheduleTimers()
+        case .paceThreshold:
+            recalculatePaceOrRefresh(resetHysteresis: true)
+        case .display:
+            statusBarController?.refreshIcon()
         }
-        service = nil
-        refreshNow()
     }
 
     private func scheduleTimers() {
@@ -102,16 +108,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshNow() {
-        guard model.isRefreshing else {
-            refreshTask = Task { await performRefresh() }
+        if refreshTask != nil {
+            refreshRequested = true
             return
+        }
+
+        refreshTask = Task { [weak self] in
+            await self?.performRefresh()
         }
     }
 
     private func performRefresh() async {
         model.showLoadingIfNeeded()
         model.setRefreshing(true)
-        defer { model.setRefreshing(false) }
+        defer {
+            model.setRefreshing(false)
+            refreshTask = nil
+            if refreshRequested {
+                refreshRequested = false
+                refreshNow()
+            }
+        }
 
         let resolver = CodexExecutableResolver()
         var resolvedExecutable: URL?
@@ -121,7 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resolvedExecutable = executableURL
             let rateLimitService = service(for: executableURL)
             let fetch = try await rateLimitService.fetchWeeklyLimit()
+            try Task.checkCancellation()
             let now = Date()
+            history.record(window: fetch.selection.window, at: now)
+            let forecast = UsageForecaster.forecast(samples: history.samples, now: now)
             let snapshot = PaceCalculator.snapshot(
                 for: fetch.selection.window,
                 now: now,
@@ -130,10 +150,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 thresholds: paceThresholds
             )
 
-            model.apply(window: fetch.selection.window, snapshot: snapshot, debugInfo: fetch.debugInfo)
-            notificationController.notifyIfNeeded(snapshot: snapshot, settings: settings, now: now)
+            model.apply(
+                window: fetch.selection.window,
+                snapshot: snapshot,
+                forecast: forecast,
+                debugInfo: fetch.debugInfo
+            )
+            notifyIfNeeded(snapshot: snapshot, now: now)
             scheduleResetTimer(for: fetch.selection.window.resetsAt)
         } catch {
+            guard !Task.isCancelled else {
+                return
+            }
             let staleAfterReset = model.snapshot.map { Date() >= $0.resetAt } ?? false
             model.applyError(error, staleAfterReset: staleAfterReset, executablePath: resolvedExecutable?.path)
         }
@@ -141,9 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func service(for executableURL: URL) -> RateLimitService {
         if serviceExecutableURL != executableURL {
-            if let service {
-                Task { await service.shutdown() }
-            }
+            invalidateService()
             service = RateLimitService(executableURL: executableURL)
             serviceExecutableURL = executableURL
         }
@@ -156,6 +182,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service = newService
         serviceExecutableURL = executableURL
         return newService
+    }
+
+    private func invalidateService() {
+        if let service {
+            Task { await service.shutdown() }
+        }
+        service = nil
+        serviceExecutableURL = nil
     }
 
     private func recalculatePaceOrRefresh(resetHysteresis: Bool = false) {
@@ -179,7 +213,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             thresholds: paceThresholds
         )
         model.applyPaceOnly(snapshot: snapshot)
-        notificationController.notifyIfNeeded(snapshot: snapshot, settings: settings, now: now)
+        notifyIfNeeded(snapshot: snapshot, now: now)
+    }
+
+    private func notifyIfNeeded(snapshot: PaceSnapshot, now: Date) {
+        notificationController.notifyIfNeeded(
+            snapshot: snapshot,
+            forecast: model.forecast,
+            enabled: settings.notificationsEnabled,
+            deltaThresholdPercentagePoints: settings.deltaThresholdPercentagePoints,
+            now: now
+        )
     }
 
     private var paceThresholds: PaceThresholds {

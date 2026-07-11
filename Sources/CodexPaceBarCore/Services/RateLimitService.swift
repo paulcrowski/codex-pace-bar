@@ -1,5 +1,11 @@
 import Foundation
 
+public protocol CodexAppServerRequesting: Sendable {
+    func ensureInitialized() async throws
+    func request(method: String, params: JSONValue?, timeoutSeconds: TimeInterval) async throws -> JSONValue
+    func shutdown() async
+}
+
 public struct RateLimitFetchResult: Sendable {
     public let selection: RateLimitSelection
     public let debugInfo: RedactedDebugInfo
@@ -12,11 +18,16 @@ public struct RateLimitFetchResult: Sendable {
 
 public actor RateLimitService {
     private let executableURL: URL
-    private let client: CodexAppServerClient
+    private let client: any CodexAppServerRequesting
 
     public init(executableURL: URL) {
         self.executableURL = executableURL
         self.client = CodexAppServerClient(executableURL: executableURL)
+    }
+
+    public init(executableURL: URL, client: any CodexAppServerRequesting) {
+        self.executableURL = executableURL
+        self.client = client
     }
 
     public func fetchWeeklyLimit() async throws -> RateLimitFetchResult {
@@ -30,6 +41,7 @@ public actor RateLimitService {
 
             let rateLimits = try await client.request(
                 method: "account/rateLimits/read",
+                params: nil,
                 timeoutSeconds: 10
             )
             let selection = try RateLimitWindowSelector.select(from: rateLimits)

@@ -25,10 +25,29 @@ public enum PaceNotificationPolicy {
             return false
         }
 
+        return cooldownHasElapsed(lastNotificationSentAt: lastNotificationSentAt, now: now)
+    }
+
+    public static func shouldNotifyForecast(
+        forecast: UsageForecast,
+        snapshot: PaceSnapshot,
+        lastNotificationSentAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard !snapshot.isStale,
+              forecast.willRunOutBeforeReset,
+              forecast.exhaustionAt > now
+        else {
+            return false
+        }
+
+        return cooldownHasElapsed(lastNotificationSentAt: lastNotificationSentAt, now: now)
+    }
+
+    private static func cooldownHasElapsed(lastNotificationSentAt: Date?, now: Date) -> Bool {
         guard let lastNotificationSentAt else {
             return true
         }
-
         return now.timeIntervalSince(lastNotificationSentAt) >= cooldownSeconds
     }
 }

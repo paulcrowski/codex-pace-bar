@@ -69,6 +69,42 @@ struct PaceNotificationPolicyTests {
         ))
     }
 
+    @Test
+    func forecastNotifiesWhenLimitWillRunOutBeforeReset() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let resetAt = now.addingTimeInterval(10 * 60 * 60)
+        let forecast = UsageForecast(
+            ratePercentagePointsPerHour: 5,
+            exhaustionAt: now.addingTimeInterval(5 * 60 * 60),
+            resetAt: resetAt
+        )
+
+        #expect(PaceNotificationPolicy.shouldNotifyForecast(
+            forecast: forecast,
+            snapshot: snapshot(delta: 8, now: now),
+            lastNotificationSentAt: nil,
+            now: now
+        ))
+    }
+
+    @Test
+    func forecastDoesNotNotifyWhenLimitLastsUntilReset() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let resetAt = now.addingTimeInterval(5 * 60 * 60)
+        let forecast = UsageForecast(
+            ratePercentagePointsPerHour: 1,
+            exhaustionAt: now.addingTimeInterval(10 * 60 * 60),
+            resetAt: resetAt
+        )
+
+        #expect(!PaceNotificationPolicy.shouldNotifyForecast(
+            forecast: forecast,
+            snapshot: snapshot(delta: 8, now: now),
+            lastNotificationSentAt: nil,
+            now: now
+        ))
+    }
+
     private func snapshot(delta: Double, now: Date, isStale: Bool = false) -> PaceSnapshot {
         PaceSnapshot(
             actualUsedPercent: 50 + delta,

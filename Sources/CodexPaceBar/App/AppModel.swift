@@ -5,13 +5,36 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    enum Failure: Equatable {
+        case codexSetupRequired(String)
+        case refreshFailed(String)
+
+        var message: String {
+            switch self {
+            case let .codexSetupRequired(message), let .refreshFailed(message):
+                return message
+            }
+        }
+
+        var requiresCodexSetup: Bool {
+            if case .codexSetupRequired = self {
+                return true
+            }
+            return false
+        }
+    }
+
     var snapshot: PaceSnapshot?
     var selectedWindow: CodexLimitWindow?
-    var displayState: PaceState = .loading
-    var errorMessage: String?
+    var forecast: UsageForecast?
+    var failure: Failure?
     var isRefreshing = false
     var lastCheckedAt: Date?
     var debugInfo = RedactedDebugInfo()
+
+    var displayState: PaceState {
+        failure == nil ? snapshot?.state ?? .loading : .error
+    }
 
     @ObservationIgnored
     var onChange: (() -> Void)?
@@ -25,16 +48,20 @@ final class AppModel {
         guard snapshot == nil else {
             return
         }
-        displayState = .loading
-        errorMessage = nil
+        failure = nil
         notify()
     }
 
-    func apply(window: CodexLimitWindow, snapshot: PaceSnapshot, debugInfo: RedactedDebugInfo) {
+    func apply(
+        window: CodexLimitWindow,
+        snapshot: PaceSnapshot,
+        forecast: UsageForecast?,
+        debugInfo: RedactedDebugInfo
+    ) {
         selectedWindow = window
         self.snapshot = snapshot
-        displayState = snapshot.state
-        errorMessage = nil
+        self.forecast = forecast
+        failure = nil
         lastCheckedAt = snapshot.fetchedAt
         self.debugInfo = debugInfo
         notify()
@@ -42,7 +69,6 @@ final class AppModel {
 
     func applyPaceOnly(snapshot: PaceSnapshot) {
         self.snapshot = snapshot
-        displayState = snapshot.state
         notify()
     }
 
@@ -62,14 +88,18 @@ final class AppModel {
                 isStale: true
             )
         }
-        displayState = .error
-        errorMessage = staleAfterReset ? PaceError.staleAfterReset(message).errorDescription : message
+        let displayedMessage = staleAfterReset ? PaceError.staleAfterReset(message).errorDescription ?? message : message
+        if (error as? PaceError)?.requiresCodexSetup == true {
+            failure = .codexSetupRequired(displayedMessage)
+        } else {
+            failure = .refreshFailed(displayedMessage)
+        }
         debugInfo = RedactedDebugInfo(
             executablePath: executablePath,
             appServerStatus: "error",
             lastMethod: "account/rateLimits/read",
             candidates: debugInfo.candidates,
-            lastError: errorMessage,
+            lastError: displayedMessage,
             generatedAt: Date()
         )
         notify()
