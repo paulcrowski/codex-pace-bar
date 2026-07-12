@@ -84,17 +84,36 @@ struct SettingsView: View {
                 .frame(width: 282)
             }
 
+            SettingsDivider()
+
+            SettingsRow(
+                icon: "info.circle",
+                title: "App version",
+                subtitle: appVersion
+            ) {
+                Link("GitHub repository", destination: repositoryURL)
+            }
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.top, 28)
         .padding(.bottom, 24)
-        .frame(width: 620, height: 520)
+        .frame(width: 620, height: 600)
         .background {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)
                 .overlay(Color.black.opacity(0.08))
         }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "Development build"
+    }
+
+    private var repositoryURL: URL {
+        URL(string: "https://github.com/awronski/codex-pace-bar")!
     }
 }
 
