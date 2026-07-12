@@ -45,7 +45,7 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 - A popover with used, ideal, remaining, reset time, and hours until reset.
 - If usage is above pace, the popover shows how long to wait for the ideal pace to catch up.
 - A chart of usage percentage during the current weekly window.
-- A run-out forecast based on at least one hour of recent local usage history.
+- A run-out forecast based on at least three samples spanning 30 minutes and one percentage point of recent usage.
 
 ![Codex Pace Bar menu bar item](docs/screenshots/menu-bar.png)
 
@@ -64,7 +64,7 @@ Settings are intentionally small:
 - Bar color scheme.
 
 Settings are stored in `UserDefaults`.
-Usage history is stored locally in Application Support and is automatically replaced when the weekly window resets.
+Usage history is stored locally in Application Support for 30 days. Reset metadata never deletes it; the chart and forecast derive the current continuous usage series from the retained archive. A validated rolling backup protects the previous file state.
 
 ## Build And Run
 
@@ -112,7 +112,7 @@ Codex Pace Bar is local-only.
 - No network calls from this app.
 - No OpenAI credentials are requested or stored.
 - Account and rate-limit data is read only through the local Codex app-server using your existing Codex session.
-- Usage history contains timestamps, percentage used, and reset metadata for the current weekly window only.
+- Usage history contains local timestamps, percentage used, limit identifiers, and reset metadata for up to 30 days.
 
 Debug information is redacted and limited to operational details such as selected executable path, app-server status, detected window durations, percentage values, reset timestamp presence, errors, and timestamps.
 

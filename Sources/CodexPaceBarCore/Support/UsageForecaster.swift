@@ -7,23 +7,19 @@ public enum UsageForecaster {
     public static let lookbackDuration: TimeInterval = 24 * 60 * 60
 
     public static func forecast(samples: [UsageSample], now: Date) -> UsageForecast? {
-        guard let latest = samples
-            .filter({ $0.timestamp <= now })
-            .max(by: { $0.timestamp < $1.timestamp }),
+        let currentSeries = UsageHistorySeries.current(from: samples, now: now)
+        guard let latest = currentSeries.last,
               latest.resetAt > now
         else {
             return nil
         }
 
         let lookbackStart = latest.timestamp.addingTimeInterval(-lookbackDuration)
-        let currentWindowSamples = samples
+        let currentWindowSamples = currentSeries
             .filter {
-                $0.limitId == latest.limitId
-                    && $0.resetAt == latest.resetAt
-                    && $0.timestamp >= lookbackStart
+                $0.timestamp >= lookbackStart
                     && $0.timestamp <= latest.timestamp
             }
-            .sorted { $0.timestamp < $1.timestamp }
 
         guard let first = currentWindowSamples.first,
               currentWindowSamples.count >= minimumSampleCount

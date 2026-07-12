@@ -277,7 +277,7 @@ struct PopoverView: View {
             }
 
             Chart {
-                ForEach(history.samples, id: \.timestamp) { sample in
+                ForEach(history.currentSamples, id: \.timestamp) { sample in
                     LineMark(
                         x: .value("Time", sample.timestamp),
                         y: .value("Used", sample.usedPercent),
@@ -307,7 +307,7 @@ struct PopoverView: View {
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
                 }
 
-                if let latest = history.samples.last {
+                if let latest = history.currentSamples.last {
                     PointMark(
                         x: .value("Time", latest.timestamp),
                         y: .value("Used", latest.usedPercent)
@@ -362,7 +362,7 @@ struct PopoverView: View {
     }
 
     private var forecastChartPoints: [UsageChartPoint] {
-        guard let latest = history.samples.last, let forecast = model.forecast else {
+        guard let latest = history.currentSamples.last, let forecast = model.forecast else {
             return []
         }
 
