@@ -69,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshNow()
         case .refreshInterval:
             scheduleTimers()
+        case .forecastMode:
+            refreshNow()
         case .paceThreshold:
             recalculatePaceOrRefresh(resetHysteresis: true)
         case .display:
@@ -141,7 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try Task.checkCancellation()
             let now = Date()
             history.record(window: fetch.selection.window, at: now)
-            let forecast = UsageForecaster.forecast(samples: history.samples, now: now)
+            let forecast = UsageForecaster.forecast(
+                samples: history.samples,
+                now: now,
+                mode: settings.historyBasedForecastEnabled ? .historyBased : .recentPace
+            )
             let snapshot = PaceCalculator.snapshot(
                 for: fetch.selection.window,
                 now: now,

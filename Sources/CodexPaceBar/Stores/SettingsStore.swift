@@ -8,6 +8,7 @@ final class SettingsStore {
     enum Change {
         case codexExecutable
         case refreshInterval
+        case forecastMode
         case paceThreshold
         case display
     }
@@ -25,6 +26,16 @@ final class SettingsStore {
                 return
             }
             defaults.set(notificationsEnabled, forKey: Keys.notificationsEnabled)
+        }
+    }
+
+    var historyBasedForecastEnabled: Bool {
+        didSet {
+            guard historyBasedForecastEnabled != oldValue else {
+                return
+            }
+            defaults.set(historyBasedForecastEnabled, forKey: Keys.historyBasedForecastEnabled)
+            onChange?(.forecastMode)
         }
     }
 
@@ -87,6 +98,7 @@ final class SettingsStore {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
+        self.historyBasedForecastEnabled = defaults.object(forKey: Keys.historyBasedForecastEnabled) as? Bool ?? true
         self.codexExecutablePath = defaults.string(forKey: Keys.codexExecutablePath) ?? "codex"
         let storedInterval = defaults.object(forKey: Keys.refreshIntervalSeconds) as? Int ?? Self.defaultRefreshInterval
         self.refreshIntervalSeconds = Self.clampRefreshInterval(storedInterval)
@@ -106,6 +118,7 @@ final class SettingsStore {
 
     private enum Keys {
         static let notificationsEnabled = "notificationsEnabled"
+        static let historyBasedForecastEnabled = "historyBasedForecastEnabled"
         static let codexExecutablePath = "codexExecutablePath"
         static let refreshIntervalSeconds = "refreshIntervalSeconds"
         static let deltaThresholdPercentagePoints = "deltaThresholdPercentagePoints"

@@ -260,7 +260,7 @@ struct PopoverView: View {
             return "Forecast: may run out in \(hours(forecast.hoursUntilExhaustion(at: Date())))"
         }
 
-        return "Forecast: current rate should last until reset"
+        return "Forecast: usage should last until reset"
     }
 
     private var usageChart: some View {

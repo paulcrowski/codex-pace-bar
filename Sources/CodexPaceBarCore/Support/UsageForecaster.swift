@@ -1,12 +1,33 @@
 import Foundation
 
 public enum UsageForecaster {
+    public enum Mode: Sendable {
+        case recentPace
+        case historyBased
+    }
+
     public static let minimumSampleCount = 3
     public static let minimumHistoryDuration: TimeInterval = 30 * 60
     public static let minimumUsageChange = 1.0
     public static let lookbackDuration: TimeInterval = 24 * 60 * 60
+    public static let historyLookbackDuration = UsageHistoryRepository.retentionDuration
 
-    public static func forecast(samples: [UsageSample], now: Date) -> UsageForecast? {
+    public static func forecast(
+        samples: [UsageSample],
+        now: Date,
+        mode: Mode,
+        calendar: Calendar = .current
+    ) -> UsageForecast? {
+        switch mode {
+        case .recentPace:
+            recentPaceForecast(samples: samples, now: now)
+        case .historyBased:
+            UsagePatternForecaster.forecast(samples: samples, now: now, calendar: calendar)
+                ?? recentPaceForecast(samples: samples, now: now)
+        }
+    }
+
+    private static func recentPaceForecast(samples: [UsageSample], now: Date) -> UsageForecast? {
         let currentSeries = UsageHistorySeries.current(from: samples, now: now)
         guard let latest = currentSeries.last,
               latest.resetAt > now

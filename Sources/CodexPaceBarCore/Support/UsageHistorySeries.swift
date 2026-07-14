@@ -24,7 +24,7 @@ public enum UsageHistorySeries {
         return Array(chronologicalSamples[currentSeriesStart...])
     }
 
-    private static func startsNewSeries(previous: UsageSample, sample: UsageSample) -> Bool {
+    static func startsNewSeries(previous: UsageSample, sample: UsageSample) -> Bool {
         if sample.usedPercent < previous.usedPercent {
             return true
         }

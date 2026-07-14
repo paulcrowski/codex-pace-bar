@@ -69,7 +69,7 @@ final class PaceNotificationController {
             let hours = max(1, Int(forecast.hoursUntilExhaustion(at: now).rounded(.up)))
             return NotificationMessage(
                 title: "Codex limit may run out early",
-                body: "At your recent usage rate, the weekly limit may run out in about \(hours) hours."
+                body: "Based on your usage, the weekly limit may run out in about \(hours) hours."
             )
         }
 

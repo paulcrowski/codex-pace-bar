@@ -18,9 +18,9 @@ Codex Pace Bar answers one question at a glance: are you using your weekly Codex
 
 ## Status
 
-Ready DMG builds are available from GitHub Releases. The package script ad-hoc signs local builds by default and can use a Developer ID signing identity for release builds.
+Ready DMG builds are available from GitHub Releases. The package script ad-hoc signs local builds by default and supports Developer ID signing and Apple notarization for public releases.
 
-Notarization is the remaining release step for smoother first launch on other Macs. The app also depends on Codex's local app-server API, so future Codex CLI changes may require an app update.
+The app depends on Codex's local app-server API, so future Codex CLI changes may require an app update.
 
 ## Requirements
 
@@ -45,7 +45,8 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 - A popover with used, ideal, remaining, reset time, and hours until reset.
 - If usage is above pace, the popover shows how long to wait for the ideal pace to catch up.
 - A chart of usage percentage during the current weekly window.
-- A run-out forecast based on at least three samples spanning 30 minutes and one percentage point of recent usage.
+- A run-out forecast that learns recency-weighted weekday and hourly usage patterns from the last 30 days.
+- A recent-pace forecast while the history-based model is still learning.
 
 ![Codex Pace Bar menu bar item](docs/screenshots/menu-bar.png)
 
@@ -59,12 +60,16 @@ Settings are intentionally small:
 - Refresh interval.
 - Pace delta threshold.
 - Daily notification when usage is well above pace.
-- Forecast notification when recent usage indicates the weekly limit may run out before reset.
+- Forecast notification when predicted usage indicates the weekly limit may run out before reset.
+- History-based forecasting, enabled by default and configurable in Settings.
 - Launch at login, enabled by default and configurable in Settings.
 - Bar color scheme.
+- Installed app version with a link to the GitHub repository.
 
 Settings are stored in `UserDefaults`.
-Usage history is stored locally in Application Support for 30 days. Reset metadata never deletes it; the chart and forecast derive the current continuous usage series from the retained archive. A validated rolling backup protects the previous file state.
+Usage history is stored locally in Application Support for 30 days. Reset metadata never deletes it; the chart derives the current continuous usage series from the retained archive. A validated rolling backup protects the previous file state.
+
+History-based forecasting groups observed percentage-point changes by local weekday and hour. Recent weeks receive more weight, token reset transitions are excluded, and gaps longer than 90 minutes are not assigned to a specific working period. The learned model requires at least seven days of history, 24 hours of usable observations, and one percentage point of observed usage. Until then, the app falls back to the recent-pace forecast, which requires three samples spanning 30 minutes and one percentage point of change.
 
 ## Build And Run
 
@@ -98,7 +103,16 @@ Create a Developer ID-signed DMG for release:
 SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/package_dmg.sh
 ```
 
-The script builds the app in release mode, signs the app bundle, and writes `dist/CodexPaceBar.dmg`.
+Create a signed and notarized release DMG using a stored `notarytool` profile:
+
+```bash
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARIZE=1 \
+NOTARY_PROFILE="your-notary-profile" \
+./script/package_dmg.sh
+```
+
+The script builds the app in release mode, signs the app bundle, and writes `dist/CodexPaceBar.dmg`. With `NOTARIZE=1`, it submits and staples both the app and DMG.
 
 Ad-hoc signing is enough to seal the local app bundle, but it is not a substitute for Apple Developer ID signing and notarization. Public downloads may still show Gatekeeper warnings until release builds are notarized.
 
@@ -127,7 +141,7 @@ Codex, OpenAI, and related names are trademarks or registered trademarks of thei
 - The app depends on Codex's local app-server interface.
 - The app-server API is experimental.
 - The app currently targets macOS 15.0+.
-- Release builds need notarization before public downloads avoid Gatekeeper warnings.
+- Local ad-hoc builds are not notarized; public releases should continue to use Developer ID signing and notarization.
 - Forecasts use percentage-based usage history because the app-server rate-limit response does not provide raw token spending totals.
 
 ## License

@@ -35,6 +35,17 @@ struct SettingsView: View {
 
             SettingsDivider()
 
+            SettingsRow(
+                icon: "chart.line.uptrend.xyaxis",
+                title: "History-based forecast",
+                subtitle: "Learns from the last 30 days; recent pace remains the fallback."
+            ) {
+                Toggle("", isOn: $settings.historyBasedForecastEnabled)
+                    .labelsHidden()
+            }
+
+            SettingsDivider()
+
             SettingsRow(icon: "terminal", title: "Codex executable path") {
                 TextField("Codex executable path", text: $settings.codexExecutablePath)
                     .textFieldStyle(.roundedBorder)
@@ -99,7 +110,7 @@ struct SettingsView: View {
         .padding(.horizontal, 24)
         .padding(.top, 28)
         .padding(.bottom, 24)
-        .frame(width: 620, height: 600)
+        .frame(width: 620, height: 680)
         .background {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)

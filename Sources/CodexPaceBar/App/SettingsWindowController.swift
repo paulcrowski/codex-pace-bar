@@ -28,7 +28,7 @@ final class SettingsWindowController {
         window.title = "Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 620, height: 600))
+        window.setContentSize(NSSize(width: 620, height: 680))
         window.center()
         self.window = window
         window.makeKeyAndOrderFront(nil)
