@@ -6,7 +6,7 @@ Unofficial macOS menu bar app that shows whether your Codex weekly usage is belo
 
 **[Download the latest ready build for macOS](https://github.com/awronski/codex-pace-bar/releases/latest/download/CodexPaceBar.dmg)**
 
-![Codex Pace Bar popover](docs/screenshots/popover.png?v=2026-06-16)
+<img src="docs/screenshots/popover.png?v=2026-06-16" alt="Codex Pace Bar popover" width="472">
 
 Codex Pace Bar answers one question at a glance: are you using your weekly Codex limit faster or slower than the current reset window pace?
 
@@ -52,7 +52,7 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 
 ## Settings
 
-![Codex Pace Bar settings](docs/screenshots/settings.png?v=06760d5)
+<img src="docs/screenshots/settings.png?v=06760d5" alt="Codex Pace Bar settings" width="626">
 
 Settings are intentionally small:
 
