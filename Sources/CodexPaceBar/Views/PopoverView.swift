@@ -9,9 +9,12 @@ struct PopoverView: View {
     let history: UsageHistoryStore
     let onRefresh: () -> Void
     let onOpenSettings: () -> Void
+    let onOpenTaskMonitor: () -> Void
     let onQuit: () -> Void
+    let taskMonitorModel: TaskMonitorViewModel?
 
     var body: some View {
+        let now = Date()
         VStack(alignment: .leading, spacing: 12) {
             PopoverHeader(model: model, settings: settings)
 
@@ -25,7 +28,16 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let snapshot = model.snapshot {
-                ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if settings.mainTaskSummaryEnabled,
+                       let taskMonitorModel,
+                       taskMonitorModel.hasActiveTasks(at: now) {
+                        PopoverTaskSummary(
+                            model: taskMonitorModel,
+                            onOpenTaskMonitor: onOpenTaskMonitor
+                        )
+                    }
+
                     PopoverMetricsSection(model: model, history: history, snapshot: snapshot)
                 }
             } else {
@@ -36,15 +48,17 @@ struct PopoverView: View {
 
             PopoverActions(
                 needsCodexSetup: model.failure?.requiresCodexSetup == true,
+                taskMonitorEnabled: settings.taskMonitorEnabled,
                 isRefreshing: model.isRefreshing,
                 onRefresh: onRefresh,
                 onOpenSettings: onOpenSettings,
+                onOpenTaskMonitor: onOpenTaskMonitor,
                 onQuit: onQuit,
                 onChooseCodexPath: { settings.chooseCodexPath() }
             )
         }
         .padding(20)
-        .frame(width: 465, height: 650)
+        .frame(width: 465, height: 650, alignment: .topLeading)
     }
 }
 

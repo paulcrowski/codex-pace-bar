@@ -27,22 +27,11 @@ struct PopoverMetricsSection: View {
 
             PopoverUsageChart(model: model, history: history)
 
-            VStack(spacing: 0) {
-                PopoverDetailRow(
-                    icon: "clock",
-                    label: "Resets",
-                    value: DateFormatters.resetFormatter.string(from: snapshot.resetAt)
-                )
-
-                Divider()
-                    .padding(.leading, 48)
-
-                PopoverDetailRow(
-                    icon: "hourglass",
-                    label: "Hours to reset",
-                    value: PopoverPresentation.hoursToReset(snapshot.resetAt, now: Date())
-                )
-            }
+            PopoverDetailRow(
+                icon: "clock",
+                label: "Reset",
+                value: "\(DateFormatters.resetFormatter.string(from: snapshot.resetAt)) · \(PopoverPresentation.hoursToReset(snapshot.resetAt, now: Date())) left"
+            )
             .padding(.horizontal, 16)
             .background(PopoverPanelBackground())
 

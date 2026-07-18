@@ -7,6 +7,10 @@ import Observation
 public final class SettingsStore {
     public enum Change {
         case codexExecutable
+        case focusLoad
+        case taskMonitor
+        case mainTaskSummary
+        case taskNotifications
         case refreshInterval
         case forecastMode
         case paceThreshold
@@ -27,6 +31,48 @@ public final class SettingsStore {
             }
             defaults.set(notificationsEnabled, forKey: Keys.notificationsEnabled)
         }
+    }
+
+    public var taskMonitorEnabled: Bool {
+        didSet {
+            guard taskMonitorEnabled != oldValue else {
+                return
+            }
+            defaults.set(taskMonitorEnabled, forKey: Keys.taskMonitorEnabled)
+            onChange?(.taskMonitor)
+        }
+    }
+
+    public var mainTaskSummaryEnabled: Bool {
+        didSet {
+            guard mainTaskSummaryEnabled != oldValue else {
+                return
+            }
+            defaults.set(mainTaskSummaryEnabled, forKey: Keys.mainTaskSummaryEnabled)
+            onChange?(.mainTaskSummary)
+        }
+    }
+
+    public var focusLoadEnabled: Bool {
+        didSet {
+            guard focusLoadEnabled != oldValue else {
+                return
+            }
+            defaults.set(focusLoadEnabled, forKey: Keys.focusLoadEnabled)
+            onChange?(.focusLoad)
+        }
+    }
+
+    public var taskNotificationsEnabled: Bool {
+        didSet {
+            guard taskNotificationsEnabled != oldValue else { return }
+            defaults.set(taskNotificationsEnabled, forKey: Keys.taskNotificationsEnabled)
+            onChange?(.taskNotifications)
+        }
+    }
+
+    public var requiresBackgroundTaskMonitoring: Bool {
+        taskMonitorEnabled && (mainTaskSummaryEnabled || taskNotificationsEnabled)
     }
 
     public var historyBasedForecastEnabled: Bool {
@@ -98,6 +144,10 @@ public final class SettingsStore {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
+        self.taskMonitorEnabled = defaults.object(forKey: Keys.taskMonitorEnabled) as? Bool ?? false
+        self.mainTaskSummaryEnabled = defaults.object(forKey: Keys.mainTaskSummaryEnabled) as? Bool ?? false
+        self.focusLoadEnabled = defaults.object(forKey: Keys.focusLoadEnabled) as? Bool ?? false
+        self.taskNotificationsEnabled = defaults.object(forKey: Keys.taskNotificationsEnabled) as? Bool ?? false
         self.historyBasedForecastEnabled = defaults.object(forKey: Keys.historyBasedForecastEnabled) as? Bool ?? true
         self.codexExecutablePath = defaults.string(forKey: Keys.codexExecutablePath) ?? "codex"
         let storedInterval = defaults.object(forKey: Keys.refreshIntervalSeconds) as? Int ?? Self.defaultRefreshInterval
@@ -118,6 +168,10 @@ public final class SettingsStore {
 
     private enum Keys {
         static let notificationsEnabled = "notificationsEnabled"
+        static let taskMonitorEnabled = "taskMonitorEnabled"
+        static let mainTaskSummaryEnabled = "mainTaskSummaryEnabled"
+        static let focusLoadEnabled = "focusLoadEnabled"
+        static let taskNotificationsEnabled = "taskNotificationsEnabled"
         static let historyBasedForecastEnabled = "historyBasedForecastEnabled"
         static let codexExecutablePath = "codexExecutablePath"
         static let refreshIntervalSeconds = "refreshIntervalSeconds"

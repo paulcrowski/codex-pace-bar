@@ -21,7 +21,7 @@ struct PopoverPresentationTests {
             isStale: false
         )
 
-        #expect(PopoverPresentation.paceStatus(snapshot: snapshot, windowDurationMins: 120) == "Rushing by <1 h")
+        #expect(PopoverPresentation.paceStatus(snapshot: snapshot, windowDurationMins: 120) == "High usage pace · <1 h ahead")
     }
 
     @Test

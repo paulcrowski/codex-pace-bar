@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var settings: SettingsStore
     @Bindable var launchAtLogin: LaunchAtLoginController
+    let onOpenTaskMonitor: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,7 +40,7 @@ struct SettingsView: View {
             SettingsRow(
                 icon: "chart.line.uptrend.xyaxis",
                 title: "History-based forecast",
-                subtitle: "Learns from the last 30 days; recent pace remains the fallback."
+                subtitle: "Forecasts limit usage from the last 30 days."
             ) {
                 Toggle("", isOn: $settings.historyBasedForecastEnabled)
                     .labelsHidden()
@@ -106,12 +107,76 @@ struct SettingsView: View {
                 Link("GitHub repository", destination: repositoryURL)
             }
 
+            ExperimentalSectionHeader()
+
+            SettingsRow(
+                icon: "list.bullet.rectangle",
+                title: "Task monitor",
+                subtitle: "Local status only. No prompts or token use."
+            ) {
+                HStack(spacing: 10) {
+                    if settings.taskMonitorEnabled {
+                        Button("Open") {
+                            onOpenTaskMonitor()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Toggle("", isOn: $settings.taskMonitorEnabled)
+                        .labelsHidden()
+                }
+            }
+
+            SettingsDivider()
+
+            SettingsRow(
+                icon: "rectangle.topthird.inset.filled",
+                title: "Task summary in main menu",
+                subtitle: settings.taskMonitorEnabled
+                    ? "Shows active tasks and ETA in the main menu."
+                    : "Enable Task Monitor to use this feature."
+            ) {
+                Toggle("", isOn: $settings.mainTaskSummaryEnabled)
+                    .labelsHidden()
+                    .disabled(!settings.taskMonitorEnabled)
+            }
+            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
+
+            SettingsDivider()
+
+            SettingsRow(
+                icon: "bell.badge",
+                title: "Task notifications",
+                subtitle: settings.taskMonitorEnabled
+                    ? "Alerts when a task needs approval or input."
+                    : "Enable Task Monitor to use this feature."
+            ) {
+                Toggle("", isOn: $settings.taskNotificationsEnabled)
+                    .labelsHidden()
+                    .disabled(!settings.taskMonitorEnabled)
+            }
+            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
+
+            SettingsDivider()
+
+            SettingsRow(
+                icon: "gauge.with.dots.needle.67percent",
+                title: "Work rhythm / Focus Load",
+                subtitle: settings.taskMonitorEnabled
+                    ? "Describes work continuity and parallel tasks."
+                    : "Enable Task Monitor to use this feature."
+            ) {
+                Toggle("", isOn: $settings.focusLoadEnabled)
+                    .labelsHidden()
+                    .disabled(!settings.taskMonitorEnabled)
+            }
+            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.top, 28)
         .padding(.bottom, 24)
-        .frame(width: 620, height: 680)
+        .frame(width: 620, height: 1000)
         .background {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)
@@ -162,7 +227,34 @@ private struct SettingsRow<Control: View>: View {
             control
                 .controlSize(.regular)
         }
-        .frame(minHeight: 76)
+        .frame(minHeight: 72)
+    }
+}
+
+private struct ExperimentalSectionHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 10) {
+                Rectangle()
+                    .fill(.separator.opacity(0.65))
+                    .frame(height: 1)
+
+                Text("EXPERIMENTAL MODE")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.tertiary)
+
+                Rectangle()
+                    .fill(.separator.opacity(0.65))
+                    .frame(height: 1)
+            }
+
+            Text("Optional local tools. Enable only what you need.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.vertical, 10)
     }
 }
 

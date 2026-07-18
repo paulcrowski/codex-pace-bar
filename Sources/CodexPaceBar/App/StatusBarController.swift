@@ -7,12 +7,16 @@ import SwiftUI
 final class StatusBarController: NSObject, NSPopoverDelegate {
     private let model: AppModel
     private let settings: SettingsStore
+    private let history: UsageHistoryStore
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let renderer = MenuBarIconRenderer()
     private let onRefresh: () -> Void
     private let onOpenSettings: () -> Void
+    private let onOpenTaskMonitor: () -> Void
     private let onQuit: () -> Void
+    private var taskMonitorModel: TaskMonitorViewModel?
+    private let hostingController: NSHostingController<PopoverView>
     private var outsideClickMonitor: Any?
 
     init(
@@ -21,30 +25,38 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         history: UsageHistoryStore,
         onRefresh: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
-        onQuit: @escaping () -> Void
+        onOpenTaskMonitor: @escaping () -> Void,
+        onQuit: @escaping () -> Void,
+        taskMonitorModel: TaskMonitorViewModel? = nil
     ) {
         self.model = model
         self.settings = settings
+        self.history = history
         self.onRefresh = onRefresh
         self.onOpenSettings = onOpenSettings
+        self.onOpenTaskMonitor = onOpenTaskMonitor
         self.onQuit = onQuit
+        self.taskMonitorModel = taskMonitorModel
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
-        super.init()
-
-        popover.behavior = .transient
-        popover.delegate = self
-        popover.contentSize = NSSize(width: 465, height: 650)
-        popover.contentViewController = NSHostingController(
+        self.hostingController = NSHostingController(
             rootView: PopoverView(
                 model: model,
                 settings: settings,
                 history: history,
                 onRefresh: onRefresh,
                 onOpenSettings: onOpenSettings,
-                onQuit: onQuit
+                onOpenTaskMonitor: onOpenTaskMonitor,
+                onQuit: onQuit,
+                taskMonitorModel: taskMonitorModel
             )
         )
+        super.init()
+
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentSize = NSSize(width: 465, height: 650)
+        popover.contentViewController = hostingController
 
         if let button = statusItem.button {
             button.target = self
@@ -60,16 +72,22 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func togglePopover() {
-        guard let button = statusItem.button else {
+        guard statusItem.button != nil else {
             return
         }
 
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            startOutsideClickMonitor()
+            show()
         }
+    }
+
+    func show() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        startOutsideClickMonitor()
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -78,6 +96,20 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     func refreshIcon() {
         updateIcon()
+    }
+
+    func setTaskMonitorModel(_ model: TaskMonitorViewModel?) {
+        taskMonitorModel = model
+        hostingController.rootView = PopoverView(
+            model: self.model,
+            settings: settings,
+            history: history,
+            onRefresh: onRefresh,
+            onOpenSettings: onOpenSettings,
+            onOpenTaskMonitor: onOpenTaskMonitor,
+            onQuit: onQuit,
+            taskMonitorModel: taskMonitorModel
+        )
     }
 
     private func startOutsideClickMonitor() {

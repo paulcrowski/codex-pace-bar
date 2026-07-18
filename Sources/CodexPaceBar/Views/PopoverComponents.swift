@@ -24,7 +24,7 @@ struct PopoverMetricCard: View {
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Circle()
                     .fill(color)
@@ -36,11 +36,11 @@ struct PopoverMetricCard: View {
             }
 
             Text(value)
-                .font(.system(size: 30, weight: .regular))
+                .font(.system(size: 26, weight: .regular))
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
+        .padding(10)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.quaternary.opacity(0.5))

@@ -19,6 +19,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
     private var stderrPipe: Pipe?
     private var decoder = JsonRpcLineDecoder()
     private var initialized = false
+    private var initializationTask: Task<Void, Error>?
     private var nextRequestID = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var notificationContinuations: [UUID: AsyncStream<CodexAppServerNotification>.Continuation] = [:]
@@ -32,25 +33,41 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
             return
         }
 
+        if let initializationTask {
+            try await initializationTask.value
+            return
+        }
+
         try startIfNeeded()
 
-        _ = try await sendRequest(
-            method: "initialize",
-            params: .object([
-                "clientInfo": .object([
-                    "name": .string("codex_pace_bar"),
-                    "title": .string("Codex Pace Bar"),
-                    "version": .string(Self.clientVersion)
+        let task = Task { [self] in
+            _ = try await sendRequest(
+                method: "initialize",
+                params: .object([
+                    "clientInfo": .object([
+                        "name": .string("codex_pace_bar"),
+                        "title": .string("Codex Pace Bar"),
+                        "version": .string(Self.clientVersion)
+                    ]),
+                    "capabilities": .object([
+                        "experimentalApi": .bool(true)
+                    ])
                 ]),
-                "capabilities": .object([
-                    "experimentalApi": .bool(true)
-                ])
-            ]),
-            timeoutSeconds: 10
-        )
+                timeoutSeconds: 10
+            )
 
-        try writeNotification(method: "initialized", params: .object([:]))
-        initialized = true
+            try writeNotification(method: "initialized", params: .object([:]))
+        }
+        initializationTask = task
+
+        do {
+            try await task.value
+            initialized = true
+            initializationTask = nil
+        } catch {
+            await shutdown()
+            throw error
+        }
     }
 
     public func request(method: String, params: JSONValue? = nil, timeoutSeconds: TimeInterval = 10) async throws -> JSONValue {
@@ -69,6 +86,8 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
     }
 
     public func shutdown() async {
+        initializationTask?.cancel()
+        initializationTask = nil
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminationHandler = nil
@@ -81,6 +100,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         stdoutPipe = nil
         stderrPipe = nil
         initialized = false
+        initializationTask = nil
         failPending(PaceError.appServerExited(nil))
         finishNotificationStreams()
     }

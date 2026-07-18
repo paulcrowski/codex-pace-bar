@@ -76,6 +76,14 @@ public final class RefreshCoordinator {
             refreshTask?.cancel()
             invalidateService()
             requestRefresh()
+        case .taskMonitor:
+            break
+        case .mainTaskSummary:
+            break
+        case .taskNotifications:
+            break
+        case .focusLoad:
+            break
         case .refreshInterval:
             break
         case .forecastMode:

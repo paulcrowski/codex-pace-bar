@@ -7,6 +7,37 @@ import Testing
 @Suite
 struct AppSupportTests {
     @Test
+    func experimentalFeaturesDefaultToOff() {
+        let defaults = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+
+        let settings = SettingsStore(defaults: defaults)
+
+        #expect(!settings.taskMonitorEnabled)
+        #expect(!settings.mainTaskSummaryEnabled)
+        #expect(!settings.focusLoadEnabled)
+        #expect(!settings.taskNotificationsEnabled)
+    }
+
+    @Test
+    func backgroundMonitoringRequiresParentAndConsumer() {
+        let defaults = UserDefaults(suiteName: "CodexPaceBarTests.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+
+        settings.focusLoadEnabled = true
+        #expect(!settings.requiresBackgroundTaskMonitoring)
+
+        settings.taskMonitorEnabled = true
+        #expect(!settings.requiresBackgroundTaskMonitoring)
+
+        settings.mainTaskSummaryEnabled = true
+        #expect(settings.requiresBackgroundTaskMonitoring)
+
+        settings.taskMonitorEnabled = false
+        #expect(!settings.requiresBackgroundTaskMonitoring)
+    }
+
+    @Test
     func settingsClampPersistAndReload() {
         let defaults = makeDefaults()
         defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
@@ -18,10 +49,18 @@ struct AppSupportTests {
         settings.refreshIntervalSeconds = 10
         settings.deltaThresholdPercentagePoints = 99
         settings.codexExecutablePath = "/tmp/test-codex"
+        settings.taskMonitorEnabled = true
+        settings.mainTaskSummaryEnabled = true
+        settings.focusLoadEnabled = true
+        settings.taskNotificationsEnabled = true
 
         #expect(settings.refreshIntervalSeconds == SettingsStore.minimumRefreshInterval)
         #expect(settings.deltaThresholdPercentagePoints == SettingsStore.maximumDeltaThreshold)
         #expect(SettingsStore(defaults: defaults).codexExecutablePath == "/tmp/test-codex")
+        #expect(SettingsStore(defaults: defaults).taskMonitorEnabled == true)
+        #expect(SettingsStore(defaults: defaults).mainTaskSummaryEnabled == true)
+        #expect(SettingsStore(defaults: defaults).focusLoadEnabled == true)
+        #expect(SettingsStore(defaults: defaults).taskNotificationsEnabled == true)
         #expect(SettingsStore(defaults: defaults).refreshIntervalSeconds == SettingsStore.minimumRefreshInterval)
         #expect(SettingsStore(defaults: defaults).deltaThresholdPercentagePoints == SettingsStore.maximumDeltaThreshold)
     }
@@ -33,13 +72,21 @@ struct AppSupportTests {
         settings.onChange = { changes.append($0) }
 
         settings.codexExecutablePath = "custom-codex"
+        settings.taskMonitorEnabled.toggle()
+        settings.mainTaskSummaryEnabled.toggle()
+        settings.focusLoadEnabled.toggle()
+        settings.taskNotificationsEnabled.toggle()
         settings.refreshIntervalSeconds = 600
         settings.historyBasedForecastEnabled.toggle()
         settings.deltaThresholdPercentagePoints = 5
         settings.barColorScheme = .statusColor
 
-        #expect(changes.count == 5)
+        #expect(changes.count == 9)
         #expect(changes.contains { if case .codexExecutable = $0 { true } else { false } })
+        #expect(changes.contains { if case .taskMonitor = $0 { true } else { false } })
+        #expect(changes.contains { if case .mainTaskSummary = $0 { true } else { false } })
+        #expect(changes.contains { if case .focusLoad = $0 { true } else { false } })
+        #expect(changes.contains { if case .taskNotifications = $0 { true } else { false } })
         #expect(changes.contains { if case .refreshInterval = $0 { true } else { false } })
         #expect(changes.contains { if case .forecastMode = $0 { true } else { false } })
         #expect(changes.contains { if case .paceThreshold = $0 { true } else { false } })
