@@ -101,7 +101,16 @@ public struct UsageHistoryRepository {
     }
 }
 
-private enum UsageHistoryRepositoryError: Error {
+public enum UsageHistoryRepositoryError: LocalizedError, Equatable {
     case unexpectedSampleLoss
     case validationFailed
+
+    public var errorDescription: String? {
+        switch self {
+        case .unexpectedSampleLoss:
+            return "Usage history update would have lost an existing sample."
+        case .validationFailed:
+            return "Usage history validation failed before writing the file."
+        }
+    }
 }
