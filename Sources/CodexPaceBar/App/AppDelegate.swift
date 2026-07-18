@@ -1,4 +1,5 @@
 @preconcurrency import AppKit
+import CodexPaceBarAppSupport
 import CodexPaceBarCore
 import Foundation
 
@@ -8,16 +9,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let history = UsageHistoryStore()
     private let launchAtLogin = LaunchAtLoginController()
     private lazy var model = AppModel()
+    private let notificationController = PaceNotificationController()
+    private lazy var coordinator = RefreshCoordinator(
+        model: model,
+        settings: settings,
+        history: history,
+        notificationHandler: { [weak self] snapshot, forecast, now in
+            guard let self else {
+                return
+            }
+            self.notificationController.notifyIfNeeded(
+                snapshot: snapshot,
+                forecast: forecast,
+                enabled: self.settings.notificationsEnabled,
+                deltaThresholdPercentagePoints: self.settings.deltaThresholdPercentagePoints,
+                now: now
+            )
+        }
+    )
     private var statusBarController: StatusBarController?
     private var settingsWindowController: SettingsWindowController?
     private var refreshTimer: Timer?
     private var markerTimer: Timer?
-    private var resetTimer: Timer?
-    private var service: RateLimitService?
-    private var serviceExecutableURL: URL?
-    private var refreshTask: Task<Void, Never>?
-    private var refreshRequested = false
-    private let notificationController = PaceNotificationController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -30,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model: model,
             settings: settings,
             history: history,
-            onRefresh: { [weak self] in self?.refreshNow() },
+            onRefresh: { [weak self] in self?.coordinator.requestRefresh() },
             onOpenSettings: { [weak self] in self?.settingsWindowController?.show() },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
@@ -47,35 +60,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         scheduleTimers()
-        refreshNow()
+        coordinator.requestRefresh()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
         markerTimer?.invalidate()
-        resetTimer?.invalidate()
-        refreshRequested = false
-        refreshTask?.cancel()
-        if let service {
-            Task { await service.shutdown() }
-        }
+        Task { await coordinator.shutdown() }
     }
 
     private func settingsDidChange(_ change: SettingsStore.Change) {
         switch change {
-        case .codexExecutable:
-            refreshTask?.cancel()
-            invalidateService()
-            refreshNow()
         case .refreshInterval:
             scheduleTimers()
-        case .forecastMode:
-            refreshNow()
-        case .paceThreshold:
-            recalculatePaceOrRefresh(resetHysteresis: true)
         case .display:
             statusBarController?.refreshIcon()
+        case .codexExecutable, .forecastMode, .paceThreshold:
+            break
         }
+        coordinator.settingsDidChange(change)
     }
 
     private func scheduleTimers() {
@@ -83,160 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         markerTimer?.invalidate()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(settings.refreshIntervalSeconds), repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshNow() }
+            Task { @MainActor in self?.coordinator.requestRefresh() }
         }
 
         markerTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.recalculatePaceOrRefresh() }
+            Task { @MainActor in self?.coordinator.recalculatePaceOrRefresh() }
         }
-    }
-
-    private func scheduleResetTimer(for resetAt: Date) {
-        resetTimer?.invalidate()
-        let now = Date()
-
-        if now >= resetAt {
-            refreshNow()
-            return
-        }
-
-        let nearReset = resetAt.addingTimeInterval(-60)
-        let fireDate = nearReset > now ? nearReset : resetAt
-        let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.refreshNow() }
-        }
-        resetTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
-
-    private func refreshNow() {
-        if refreshTask != nil {
-            refreshRequested = true
-            return
-        }
-
-        refreshTask = Task { [weak self] in
-            await self?.performRefresh()
-        }
-    }
-
-    private func performRefresh() async {
-        model.showLoadingIfNeeded()
-        model.setRefreshing(true)
-        defer {
-            model.setRefreshing(false)
-            refreshTask = nil
-            if refreshRequested {
-                refreshRequested = false
-                refreshNow()
-            }
-        }
-
-        let resolver = CodexExecutableResolver()
-        var resolvedExecutable: URL?
-
-        do {
-            let executableURL = try resolver.resolve(configuredPath: settings.codexExecutablePath)
-            resolvedExecutable = executableURL
-            let rateLimitService = service(for: executableURL)
-            let fetch = try await rateLimitService.fetchWeeklyLimit()
-            try Task.checkCancellation()
-            let now = Date()
-            history.record(window: fetch.selection.window, at: now)
-            let forecast = UsageForecaster.forecast(
-                samples: history.samples,
-                now: now,
-                mode: settings.historyBasedForecastEnabled ? .historyBased : .recentPace
-            )
-            let snapshot = PaceCalculator.snapshot(
-                for: fetch.selection.window,
-                now: now,
-                fetchedAt: now,
-                previousState: model.snapshot?.state,
-                thresholds: paceThresholds
-            )
-
-            model.apply(
-                window: fetch.selection.window,
-                snapshot: snapshot,
-                forecast: forecast,
-                debugInfo: fetch.debugInfo
-            )
-            notifyIfNeeded(snapshot: snapshot, now: now)
-            scheduleResetTimer(for: fetch.selection.window.resetsAt)
-        } catch {
-            guard !Task.isCancelled else {
-                return
-            }
-            let staleAfterReset = model.snapshot.map { Date() >= $0.resetAt } ?? false
-            model.applyError(error, staleAfterReset: staleAfterReset, executablePath: resolvedExecutable?.path)
-        }
-    }
-
-    private func service(for executableURL: URL) -> RateLimitService {
-        if serviceExecutableURL != executableURL {
-            invalidateService()
-            service = RateLimitService(executableURL: executableURL)
-            serviceExecutableURL = executableURL
-        }
-
-        if let service {
-            return service
-        }
-
-        let newService = RateLimitService(executableURL: executableURL)
-        service = newService
-        serviceExecutableURL = executableURL
-        return newService
-    }
-
-    private func invalidateService() {
-        if let service {
-            Task { await service.shutdown() }
-        }
-        service = nil
-        serviceExecutableURL = nil
-    }
-
-    private func recalculatePaceOrRefresh(resetHysteresis: Bool = false) {
-        guard let window = model.selectedWindow, let existingSnapshot = model.snapshot else {
-            refreshNow()
-            return
-        }
-
-        let now = Date()
-        guard now < window.resetsAt else {
-            refreshNow()
-            return
-        }
-
-        let snapshot = PaceCalculator.snapshot(
-            for: window,
-            now: now,
-            fetchedAt: existingSnapshot.fetchedAt,
-            previousState: resetHysteresis ? nil : existingSnapshot.state,
-            isStale: existingSnapshot.isStale,
-            thresholds: paceThresholds
-        )
-        model.applyPaceOnly(snapshot: snapshot)
-        notifyIfNeeded(snapshot: snapshot, now: now)
-    }
-
-    private func notifyIfNeeded(snapshot: PaceSnapshot, now: Date) {
-        notificationController.notifyIfNeeded(
-            snapshot: snapshot,
-            forecast: model.forecast,
-            enabled: settings.notificationsEnabled,
-            deltaThresholdPercentagePoints: settings.deltaThresholdPercentagePoints,
-            now: now
-        )
-    }
-
-    private var paceThresholds: PaceThresholds {
-        PaceThresholds(deltaPercentagePoints: Double(settings.deltaThresholdPercentagePoints))
     }
 
     @objc private func systemDidWake() {
-        refreshNow()
+        coordinator.requestRefresh()
     }
 }

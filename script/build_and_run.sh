@@ -7,6 +7,7 @@ DISPLAY_NAME="Codex Pace Bar"
 BUNDLE_ID="app.codexpacebar.macos"
 MIN_SYSTEM_VERSION="15.0"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
+BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-debug}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
@@ -21,14 +22,37 @@ APP_ICON="$ROOT_DIR/Resources/AppIcon.icns"
 
 cd "$ROOT_DIR"
 
+case "$BUILD_CONFIGURATION" in
+  debug|release) ;;
+  *)
+    echo "BUILD_CONFIGURATION must be debug or release." >&2
+    exit 2
+    ;;
+esac
+
+case "$MODE" in
+  run|--build-only|build-only|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify) ;;
+  *)
+    echo "usage: $0 [run|--build-only|--verify|--debug|--logs|--telemetry]" >&2
+    exit 2
+    ;;
+esac
+
 if [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Developer" ]]; then
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+if [[ "$MODE" != "--build-only" && "$MODE" != "build-only" ]]; then
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+fi
 
-swift build --product "$APP_NAME"
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+if [[ "$BUILD_CONFIGURATION" == "release" ]]; then
+  swift build -c release --product "$APP_NAME"
+  BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
+else
+  swift build --product "$APP_NAME"
+  BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+fi
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
@@ -71,6 +95,8 @@ PLIST
 
 codesign --force --sign - --timestamp=none "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+test -x "$APP_BINARY"
+test -f "$APP_RESOURCES/AppIcon.icns"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
@@ -79,6 +105,9 @@ open_app() {
 case "$MODE" in
   run)
     open_app
+    ;;
+  --build-only|build-only)
+    echo "$APP_BUNDLE"
     ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
@@ -94,10 +123,7 @@ case "$MODE" in
   --verify|verify)
     open_app
     sleep 2
+    test -x "$APP_BINARY"
     pgrep -x "$APP_NAME" >/dev/null
-    ;;
-  *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
-    exit 2
     ;;
 esac

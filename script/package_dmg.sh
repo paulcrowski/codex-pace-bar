@@ -73,6 +73,8 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/AppIcon.icns"
 chmod +x "$APP_BINARY"
+test -x "$APP_BINARY"
+test -f "$APP_RESOURCES/AppIcon.icns"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -113,6 +115,10 @@ else
   codesign --force --sign - --timestamp=none "$APP_BUNDLE"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  echo "Ad-hoc app signature verified; Developer ID release proof is not available without SIGNING_IDENTITY."
+fi
 
 if [[ "$NOTARIZE" == "1" ]]; then
   ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
