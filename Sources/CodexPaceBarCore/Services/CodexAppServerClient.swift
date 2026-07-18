@@ -13,6 +13,7 @@ public struct CodexAppServerNotification: Equatable, Sendable {
 public actor CodexAppServerClient: CodexAppServerRequesting {
     private let executableURL: URL
     private var process: Process?
+    private var processGeneration: UUID?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
@@ -74,6 +75,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         if process?.isRunning == true {
             process?.terminate()
         }
+        processGeneration = nil
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
@@ -92,6 +94,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         decoder = JsonRpcLineDecoder()
 
         let process = Process()
+        let generation = UUID()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -115,8 +118,15 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         }
 
         process.terminationHandler = { [weak self] process in
-            Task { await self?.handleTermination(status: process.terminationStatus) }
+            Task {
+                await self?.handleTermination(
+                    status: process.terminationStatus,
+                    generation: generation
+                )
+            }
         }
+
+        self.processGeneration = generation
 
         do {
             try process.run()
@@ -270,9 +280,14 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         continuation.resume(returning: object["result"] ?? .null)
     }
 
-    private func handleTermination(status: Int32) {
+    private func handleTermination(status: Int32, generation: UUID) {
+        guard processGeneration == generation else {
+            return
+        }
+
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
+        processGeneration = nil
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
