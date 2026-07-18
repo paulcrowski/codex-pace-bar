@@ -24,7 +24,7 @@ struct CodexAppServerClientTests {
         defer { Task { await client.shutdown() } }
 
         let stream = await client.notifications()
-        let notificationTask = Task {
+        let notificationTask = Task<CodexAppServerNotification?, Never> {
             for await notification in stream {
                 return notification
             }
@@ -36,7 +36,7 @@ struct CodexAppServerClientTests {
 
         #expect(result["ok"] == .bool(true))
         #expect(notification?.method == "turn/started")
-        #expect(notification?.params?["threadId"] == .string("thread-1"))
+        #expect(notification?.params?["threadId"] == JSONValue.string("thread-1"))
     }
 
     @Test

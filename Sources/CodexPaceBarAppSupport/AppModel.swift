@@ -4,19 +4,19 @@ import Observation
 
 @MainActor
 @Observable
-final class AppModel {
-    enum Failure: Equatable {
+public final class AppModel {
+    public enum Failure: Equatable {
         case codexSetupRequired(String)
         case refreshFailed(String)
 
-        var message: String {
+        public var message: String {
             switch self {
             case let .codexSetupRequired(message), let .refreshFailed(message):
                 return message
             }
         }
 
-        var requiresCodexSetup: Bool {
+        public var requiresCodexSetup: Bool {
             if case .codexSetupRequired = self {
                 return true
             }
@@ -24,27 +24,29 @@ final class AppModel {
         }
     }
 
-    var snapshot: PaceSnapshot?
-    var selectedWindow: CodexLimitWindow?
-    var forecast: UsageForecast?
-    var failure: Failure?
-    var isRefreshing = false
-    var lastCheckedAt: Date?
-    var debugInfo = RedactedDebugInfo()
+    public var snapshot: PaceSnapshot?
+    public var selectedWindow: CodexLimitWindow?
+    public var forecast: UsageForecast?
+    public var failure: Failure?
+    public var isRefreshing = false
+    public var lastCheckedAt: Date?
+    public var debugInfo = RedactedDebugInfo()
 
-    var displayState: PaceState {
+    public var displayState: PaceState {
         failure == nil ? snapshot?.state ?? .loading : .error
     }
 
     @ObservationIgnored
-    var onChange: (() -> Void)?
+    public var onChange: (() -> Void)?
 
-    func setRefreshing(_ refreshing: Bool) {
+    public init() {}
+
+    public func setRefreshing(_ refreshing: Bool) {
         isRefreshing = refreshing
         notify()
     }
 
-    func showLoadingIfNeeded() {
+    public func showLoadingIfNeeded() {
         guard snapshot == nil else {
             return
         }
@@ -52,7 +54,7 @@ final class AppModel {
         notify()
     }
 
-    func apply(
+    public func apply(
         window: CodexLimitWindow,
         snapshot: PaceSnapshot,
         forecast: UsageForecast?,
@@ -67,12 +69,12 @@ final class AppModel {
         notify()
     }
 
-    func applyPaceOnly(snapshot: PaceSnapshot) {
+    public func applyPaceOnly(snapshot: PaceSnapshot) {
         self.snapshot = snapshot
         notify()
     }
 
-    func applyError(_ error: Error, staleAfterReset: Bool, executablePath: String?) {
+    public func applyError(_ error: Error, staleAfterReset: Bool, executablePath: String?, now: Date = Date()) {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         if staleAfterReset, let existingSnapshot = snapshot {
             snapshot = PaceSnapshot(
@@ -100,7 +102,7 @@ final class AppModel {
             lastMethod: "account/rateLimits/read",
             candidates: debugInfo.candidates,
             lastError: displayedMessage,
-            generatedAt: Date()
+            generatedAt: now
         )
         notify()
     }
