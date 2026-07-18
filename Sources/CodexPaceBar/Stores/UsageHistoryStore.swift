@@ -6,6 +6,7 @@ import Observation
 @Observable
 final class UsageHistoryStore {
     private(set) var samples: [UsageSample]
+    private(set) var lastPersistenceError: String?
 
     @ObservationIgnored
     private let repository: UsageHistoryRepository
@@ -15,6 +16,7 @@ final class UsageHistoryStore {
         let repository = UsageHistoryRepository(fileURL: fileURL, fileManager: fileManager)
         self.repository = repository
         self.samples = repository.load()
+        self.lastPersistenceError = nil
     }
 
     var currentSamples: [UsageSample] {
@@ -31,8 +33,9 @@ final class UsageHistoryStore {
 
         do {
             samples = try repository.appending(sample, to: samples)
+            lastPersistenceError = nil
         } catch {
-            // History is optional; failed persistence must not interrupt rate-limit refreshes.
+            lastPersistenceError = error.localizedDescription
         }
     }
 
