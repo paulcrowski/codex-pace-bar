@@ -61,12 +61,12 @@ struct PopoverView: View {
     private func metrics(_ snapshot: PaceSnapshot) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
-                MetricCard(label: "Used", value: percent(snapshot.actualUsedPercent), color: usedMetricColor(snapshot))
-                MetricCard(label: "Ideal", value: percent(snapshot.idealUsedPercent), color: .blue)
-                MetricCard(label: "Remaining", value: percent(snapshot.remainingPercent), color: .gray)
+                PopoverMetricCard(label: "Used", value: percent(snapshot.actualUsedPercent), color: usedMetricColor(snapshot))
+                PopoverMetricCard(label: "Ideal", value: percent(snapshot.idealUsedPercent), color: .blue)
+                PopoverMetricCard(label: "Remaining", value: percent(snapshot.remainingPercent), color: .gray)
             }
 
-            StatusCard(
+            PopoverStatusCard(
                 title: paceStatus(snapshot),
                 subtitle: forecastStatus,
                 state: snapshot.state,
@@ -76,7 +76,7 @@ struct PopoverView: View {
             usageChart
 
             VStack(spacing: 0) {
-                DetailRow(
+                PopoverDetailRow(
                     icon: "clock",
                     label: "Resets",
                     value: DateFormatters.resetFormatter.string(from: snapshot.resetAt)
@@ -85,7 +85,7 @@ struct PopoverView: View {
                 Divider()
                     .padding(.leading, 48)
 
-                DetailRow(
+                PopoverDetailRow(
                     icon: "hourglass",
                     label: "Hours to reset",
                     value: hoursToReset(snapshot.resetAt)
@@ -337,9 +337,9 @@ struct PopoverView: View {
             .frame(height: 145)
 
             HStack(spacing: 14) {
-                ChartLegendItem(label: "Actual", color: .blue)
-                ChartLegendItem(label: "Ideal pace", color: .gray)
-                ChartLegendItem(
+                PopoverChartLegendItem(label: "Actual", color: .blue)
+                PopoverChartLegendItem(label: "Ideal pace", color: .gray)
+                PopoverChartLegendItem(
                     label: model.forecast == nil ? "Forecast pending" : "Forecast",
                     color: model.forecast == nil ? .orange.opacity(0.4) : .orange
                 )
@@ -349,19 +349,19 @@ struct PopoverView: View {
         .background(panelBackground)
     }
 
-    private var idealChartPoints: [UsageChartPoint] {
+    private var idealChartPoints: [PopoverUsageChartPoint] {
         guard let window = model.selectedWindow else {
             return []
         }
 
         let start = window.resetsAt.addingTimeInterval(-window.windowDurationMins * 60)
         return [
-            UsageChartPoint(id: "ideal-start", date: start, value: 0),
-            UsageChartPoint(id: "ideal-end", date: window.resetsAt, value: 100)
+            PopoverUsageChartPoint(id: "ideal-start", date: start, value: 0),
+            PopoverUsageChartPoint(id: "ideal-end", date: window.resetsAt, value: 100)
         ]
     }
 
-    private var forecastChartPoints: [UsageChartPoint] {
+    private var forecastChartPoints: [PopoverUsageChartPoint] {
         guard let latest = history.currentSamples.last, let forecast = model.forecast else {
             return []
         }
@@ -370,8 +370,8 @@ struct PopoverView: View {
         let forecastHours = max(0, end.timeIntervalSince(latest.timestamp) / 3600)
         let endValue = min(100, latest.usedPercent + forecast.ratePercentagePointsPerHour * forecastHours)
         return [
-            UsageChartPoint(id: "forecast-start", date: latest.timestamp, value: latest.usedPercent),
-            UsageChartPoint(id: "forecast-end", date: end, value: endValue)
+            PopoverUsageChartPoint(id: "forecast-start", date: latest.timestamp, value: latest.usedPercent),
+            PopoverUsageChartPoint(id: "forecast-end", date: end, value: endValue)
         ]
     }
 
@@ -391,166 +391,5 @@ struct PopoverView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(.separator.opacity(0.35), lineWidth: 1)
             }
-    }
-}
-
-private struct UsageChartPoint: Identifiable {
-    let id: String
-    let date: Date
-    let value: Double
-}
-
-private struct ChartLegendItem: View {
-    let label: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct MetricCard: View {
-    let label: String
-    let value: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 9, height: 9)
-
-                Text(label)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(value)
-                .font(.system(size: 30, weight: .regular))
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary.opacity(0.5))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(.separator.opacity(0.35), lineWidth: 1)
-                }
-        }
-    }
-}
-
-private struct StatusCard: View {
-    let title: String
-    let subtitle: String?
-    let state: PaceState
-    let isStale: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(iconColor.opacity(0.25))
-
-                Image(systemName: iconName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(iconColor)
-            }
-            .frame(width: 34, height: 34)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary.opacity(0.5))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(.separator.opacity(0.35), lineWidth: 1)
-                }
-        }
-    }
-
-    private var iconColor: Color {
-        if isStale {
-            return .gray
-        }
-
-        switch state {
-        case .abovePace:
-            return .blue
-        case .belowPace:
-            return .green
-        case .onPace:
-            return .blue
-        case .loading, .error:
-            return .gray
-        }
-    }
-
-    private var iconName: String {
-        switch state {
-        case .abovePace:
-            return "waveform.path.ecg"
-        case .belowPace:
-            return "arrow.down.right"
-        case .onPace:
-            return "checkmark"
-        case .loading:
-            return "clock"
-        case .error:
-            return "exclamationmark"
-        }
-    }
-}
-
-private struct DetailRow: View {
-    let icon: String
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.blue)
-                .frame(width: 24)
-
-            Text(label)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Text(value)
-                .font(.system(size: 14, weight: .semibold))
-                .monospacedDigit()
-        }
-        .frame(height: 42)
     }
 }
