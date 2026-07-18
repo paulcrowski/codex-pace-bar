@@ -2,12 +2,6 @@ import CodexPaceBarCore
 import Foundation
 import SwiftUI
 
-struct PopoverUsageChartPoint: Identifiable {
-    let id: String
-    let date: Date
-    let value: Double
-}
-
 struct PopoverChartLegendItem: View {
     let label: String
     let color: Color

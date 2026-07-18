@@ -1,5 +1,6 @@
-import SwiftUI
+import CodexPaceBarAppSupport
 import CodexPaceBarCore
+import SwiftUI
 
 struct SettingsView: View {
     @Bindable var settings: SettingsStore

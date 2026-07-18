@@ -4,8 +4,8 @@ import Observation
 
 @MainActor
 @Observable
-final class SettingsStore {
-    enum Change {
+public final class SettingsStore {
+    public enum Change {
         case codexExecutable
         case refreshInterval
         case forecastMode
@@ -13,14 +13,14 @@ final class SettingsStore {
         case display
     }
 
-    static let minimumRefreshInterval = 60
-    static let defaultRefreshInterval = 300
-    static let maximumRefreshInterval = 3600
-    static let minimumDeltaThreshold = 1
-    static let defaultDeltaThreshold = 2
-    static let maximumDeltaThreshold = 20
+    public static let minimumRefreshInterval = 60
+    public static let defaultRefreshInterval = 300
+    public static let maximumRefreshInterval = 3600
+    public static let minimumDeltaThreshold = 1
+    public static let defaultDeltaThreshold = 2
+    public static let maximumDeltaThreshold = 20
 
-    var notificationsEnabled: Bool {
+    public var notificationsEnabled: Bool {
         didSet {
             guard notificationsEnabled != oldValue else {
                 return
@@ -29,7 +29,7 @@ final class SettingsStore {
         }
     }
 
-    var historyBasedForecastEnabled: Bool {
+    public var historyBasedForecastEnabled: Bool {
         didSet {
             guard historyBasedForecastEnabled != oldValue else {
                 return
@@ -39,7 +39,7 @@ final class SettingsStore {
         }
     }
 
-    var codexExecutablePath: String {
+    public var codexExecutablePath: String {
         didSet {
             guard codexExecutablePath != oldValue else {
                 return
@@ -49,7 +49,7 @@ final class SettingsStore {
         }
     }
 
-    var refreshIntervalSeconds: Int {
+    public var refreshIntervalSeconds: Int {
         didSet {
             let clamped = Self.clampRefreshInterval(refreshIntervalSeconds)
             if clamped != refreshIntervalSeconds {
@@ -64,7 +64,7 @@ final class SettingsStore {
         }
     }
 
-    var deltaThresholdPercentagePoints: Int {
+    public var deltaThresholdPercentagePoints: Int {
         didSet {
             let clamped = Self.clampDeltaThreshold(deltaThresholdPercentagePoints)
             if clamped != deltaThresholdPercentagePoints {
@@ -79,7 +79,7 @@ final class SettingsStore {
         }
     }
 
-    var barColorScheme: BarColorScheme {
+    public var barColorScheme: BarColorScheme {
         didSet {
             guard barColorScheme != oldValue else {
                 return
@@ -93,9 +93,9 @@ final class SettingsStore {
     private let defaults: UserDefaults
 
     @ObservationIgnored
-    var onChange: ((Change) -> Void)?
+    public var onChange: ((Change) -> Void)?
 
-    init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
         self.historyBasedForecastEnabled = defaults.object(forKey: Keys.historyBasedForecastEnabled) as? Bool ?? true

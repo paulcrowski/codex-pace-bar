@@ -1,4 +1,5 @@
 @preconcurrency import AppKit
+import CodexPaceBarAppSupport
 import CodexPaceBarCore
 import SwiftUI
 

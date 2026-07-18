@@ -15,14 +15,19 @@ let package = Package(
             name: "CodexPaceBarCore",
             path: "Sources/CodexPaceBarCore"
         ),
+        .target(
+            name: "CodexPaceBarAppSupport",
+            dependencies: ["CodexPaceBarCore"],
+            path: "Sources/CodexPaceBarAppSupport"
+        ),
         .executableTarget(
             name: "CodexPaceBar",
-            dependencies: ["CodexPaceBarCore"],
+            dependencies: ["CodexPaceBarCore", "CodexPaceBarAppSupport"],
             path: "Sources/CodexPaceBar"
         ),
         .testTarget(
             name: "CodexPaceBarTests",
-            dependencies: ["CodexPaceBarCore"],
+            dependencies: ["CodexPaceBarCore", "CodexPaceBarAppSupport"],
             path: "Tests/CodexPaceBarTests"
         )
     ]

@@ -20,8 +20,8 @@ jobs:
       - name: Select Swift toolchain
         run: swift --version
 
-      - name: Run tests
-        run: swift test
+      - name: Validate shell scripts
+        run: bash -n script/build_and_run.sh script/release_gate.sh script/package_dmg.sh
 
-      - name: Build release executable
-        run: swift build -c release
+      - name: Run local release gate
+        run: bash script/release_gate.sh
