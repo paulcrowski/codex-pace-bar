@@ -1,5 +1,15 @@
 import Foundation
 
+public struct CodexAppServerNotification: Equatable, Sendable {
+    public let method: String
+    public let params: JSONValue?
+
+    public init(method: String, params: JSONValue?) {
+        self.method = method
+        self.params = params
+    }
+}
+
 public actor CodexAppServerClient: CodexAppServerRequesting {
     private let executableURL: URL
     private var process: Process?
@@ -10,6 +20,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
     private var initialized = false
     private var nextRequestID = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
+    private var notificationContinuations: [UUID: AsyncStream<CodexAppServerNotification>.Continuation] = [:]
 
     public init(executableURL: URL) {
         self.executableURL = executableURL
@@ -46,6 +57,16 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         return try await sendRequest(method: method, params: params, timeoutSeconds: timeoutSeconds)
     }
 
+    public func notifications() -> AsyncStream<CodexAppServerNotification> {
+        let subscriberID = UUID()
+        return AsyncStream { continuation in
+            notificationContinuations[subscriberID] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeNotificationSubscriber(subscriberID) }
+            }
+        }
+    }
+
     public func shutdown() async {
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
@@ -59,6 +80,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         stderrPipe = nil
         initialized = false
         failPending(PaceError.appServerExited(nil))
+        finishNotificationStreams()
     }
 
     private func startIfNeeded() throws {
@@ -219,6 +241,17 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
             return
         }
 
+        if let method = object["method"]?.stringValue {
+            let notification = CodexAppServerNotification(
+                method: method,
+                params: object["params"]
+            )
+            for continuation in notificationContinuations.values {
+                continuation.yield(notification)
+            }
+            return
+        }
+
         guard let id = object["id"]?.intValue else {
             return
         }
@@ -246,6 +279,7 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         stderrPipe = nil
         initialized = false
         failPending(PaceError.appServerExited(status))
+        finishNotificationStreams()
     }
 
     private func cancelPendingRequest(_ id: Int) {
@@ -259,6 +293,18 @@ public actor CodexAppServerClient: CodexAppServerRequesting {
         self.pending.removeAll()
         for continuation in pending.values {
             continuation.resume(throwing: error)
+        }
+    }
+
+    private func removeNotificationSubscriber(_ id: UUID) {
+        notificationContinuations.removeValue(forKey: id)
+    }
+
+    private func finishNotificationStreams() {
+        let continuations = notificationContinuations.values
+        notificationContinuations.removeAll()
+        for continuation in continuations {
+            continuation.finish()
         }
     }
 

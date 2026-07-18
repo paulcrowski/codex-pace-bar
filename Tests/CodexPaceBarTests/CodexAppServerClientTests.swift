@@ -17,6 +17,29 @@ struct CodexAppServerClientTests {
     }
 
     @Test
+    func publishesServerNotificationsSeparatelyFromResponses() async throws {
+        let fixture = try makeFakeServer()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = CodexAppServerClient(executableURL: fixture.executable)
+        defer { Task { await client.shutdown() } }
+
+        let stream = await client.notifications()
+        let notificationTask = Task {
+            for await notification in stream {
+                return notification
+            }
+            return nil
+        }
+
+        let result = try await client.request(method: "notify", timeoutSeconds: 1)
+        let notification = await notificationTask.value
+
+        #expect(result["ok"] == .bool(true))
+        #expect(notification?.method == "turn/started")
+        #expect(notification?.params?["threadId"] == .string("thread-1"))
+    }
+
+    @Test
     func timesOutAndRemainsUsable() async throws {
         let fixture = try makeFakeServer()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -107,6 +130,10 @@ struct CodexAppServerClientTests {
               printf '{"id":%s,"result":{}}\n' "$id"
               ;;
             *'"method":"echo"'*)
+              printf '{"id":%s,"result":{"ok":true}}\n' "$id"
+              ;;
+            *'"method":"notify"'*)
+              printf '{"method":"turn/started","params":{"threadId":"thread-1"}}\n'
               printf '{"id":%s,"result":{"ok":true}}\n' "$id"
               ;;
             *'"method":"malformed"'*)
