@@ -8,7 +8,7 @@ struct PopoverUsageChart: View {
     let history: UsageHistoryStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text("Weekly limit usage (%)")
                     .font(.system(size: 14, weight: .semibold))
@@ -78,9 +78,9 @@ struct PopoverUsageChart: View {
                     AxisValueLabel(format: .dateTime.weekday(.abbreviated).hour())
                 }
             }
-            .frame(height: 145)
+            .frame(height: 105)
 
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 PopoverChartLegendItem(label: "Actual", color: .blue)
                 PopoverChartLegendItem(label: "Ideal pace", color: .gray)
                 PopoverChartLegendItem(
@@ -89,7 +89,7 @@ struct PopoverUsageChart: View {
                 )
             }
         }
-        .padding(12)
+        .padding(10)
         .background(PopoverPanelBackground())
     }
 }

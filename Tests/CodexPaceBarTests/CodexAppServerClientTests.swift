@@ -2,7 +2,7 @@ import CodexPaceBarCore
 import Foundation
 import Testing
 
-@Suite
+@Suite(.serialized)
 struct CodexAppServerClientTests {
     @Test
     func sendsRequestsAndCorrelatesResponses() async throws {
@@ -13,6 +13,41 @@ struct CodexAppServerClientTests {
 
         let result = try await client.request(method: "echo", timeoutSeconds: 1)
 
+        #expect(result["ok"] == .bool(true))
+    }
+
+    @Test
+    func concurrentInitializationSendsOnlyOneInitializeRequest() async throws {
+        let fixture = try makeFakeServer()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = CodexAppServerClient(executableURL: fixture.executable)
+        defer { Task { await client.shutdown() } }
+
+        async let first: Void = client.ensureInitialized()
+        async let second: Void = client.ensureInitialized()
+        try await first
+        try await second
+
+        let result = try await client.request(method: "echo", timeoutSeconds: 1)
+        #expect(result["ok"] == .bool(true))
+    }
+
+    @Test
+    func failedInitializationRestartsProcessBeforeRetry() async throws {
+        let fixture = try makeFailOnceFakeServer()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = CodexAppServerClient(executableURL: fixture.executable)
+        defer { Task { await client.shutdown() } }
+
+        do {
+            try await client.ensureInitialized()
+            Issue.record("Expected first initialization to fail.")
+        } catch PaceError.jsonRpcError(let code, _) {
+            #expect(code == -32_000)
+        }
+
+        try await client.ensureInitialized()
+        let result = try await client.request(method: "echo", timeoutSeconds: 1)
         #expect(result["ok"] == .bool(true))
     }
 
@@ -123,11 +158,17 @@ struct CodexAppServerClientTests {
 
         let script = #"""
         #!/bin/sh
+        initialize_count=0
         while IFS= read -r line; do
           id=$(printf '%s\n' "$line" | /usr/bin/sed -E 's/.*"id":([0-9]+).*/\1/')
           case "$line" in
             *'"method":"initialize"'*)
-              printf '{"id":%s,"result":{}}\n' "$id"
+              initialize_count=$((initialize_count + 1))
+              if [ "$initialize_count" -eq 1 ]; then
+                printf '{"id":%s,"result":{}}\n' "$id"
+              else
+                printf '{"id":%s,"error":{"code":-32600,"message":"Already initialized"}}\n' "$id"
+              fi
               ;;
             *'"method":"echo"'*)
               printf '{"id":%s,"result":{"ok":true}}\n' "$id"
@@ -143,6 +184,45 @@ struct CodexAppServerClientTests {
               exit 7
               ;;
             *'"method":"hang"'*)
+              ;;
+          esac
+        done
+        """#
+
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        return (root, executable)
+    }
+
+    private func makeFailOnceFakeServer() throws -> (root: URL, executable: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexAppServerClientTests")
+            .appendingPathComponent(UUID().uuidString)
+        let executable = root.appendingPathComponent("fake-codex")
+        let marker = root.appendingPathComponent("first-initialize-failed")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let script = #"""
+        #!/bin/sh
+        attempted=0
+        marker="\#(marker.path)"
+        while IFS= read -r line; do
+          id=$(printf '%s\n' "$line" | /usr/bin/sed -E 's/.*"id":([0-9]+).*/\1/')
+          case "$line" in
+            *'"method":"initialize"'*)
+              if [ "$attempted" -eq 1 ]; then
+                printf '{"id":%s,"error":{"code":-32600,"message":"Already initialized"}}\n' "$id"
+              elif [ ! -f "$marker" ]; then
+                attempted=1
+                /usr/bin/touch "$marker"
+                printf '{"id":%s,"error":{"code":-32000,"message":"Temporary initialization failure"}}\n' "$id"
+              else
+                attempted=1
+                printf '{"id":%s,"result":{}}\n' "$id"
+              fi
+              ;;
+            *'"method":"echo"'*)
+              printf '{"id":%s,"result":{"ok":true}}\n' "$id"
               ;;
           esac
         done

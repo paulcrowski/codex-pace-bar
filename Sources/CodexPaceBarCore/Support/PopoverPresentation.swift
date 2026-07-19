@@ -27,9 +27,9 @@ public enum PopoverPresentation {
 
         switch snapshot.state {
         case .abovePace:
-            return "Rushing by \(hours(deltaHours))"
+            return "High usage pace · \(hours(deltaHours)) ahead"
         case .belowPace:
-            return "Dragging by \(hours(deltaHours))"
+            return "Low usage pace · \(hours(deltaHours)) behind"
         case .onPace, .loading, .error:
             return "On pace"
         }

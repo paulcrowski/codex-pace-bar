@@ -19,6 +19,8 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+HOOK_FORWARDER_NAME="CodexPaceBarHookForwarder"
+HOOK_FORWARDER_BINARY="$APP_MACOS/$HOOK_FORWARDER_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/Resources/AppIcon.icns"
 DMG_ROOT="$DIST_DIR/dmg-root"
@@ -66,14 +68,19 @@ create_dmg() {
 }
 
 swift build -c release --product "$APP_NAME"
+swift build -c release --product "$HOOK_FORWARDER_NAME"
 BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
+HOOK_BUILD_BINARY="$(swift build -c release --show-bin-path)/$HOOK_FORWARDER_NAME"
 
 rm -rf "$APP_BUNDLE" "$DMG_ROOT" "$DMG_PATH" "$APP_ZIP"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
+cp "$HOOK_BUILD_BINARY" "$HOOK_FORWARDER_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/AppIcon.icns"
 chmod +x "$APP_BINARY"
+chmod +x "$HOOK_FORWARDER_BINARY"
 test -x "$APP_BINARY"
+test -x "$HOOK_FORWARDER_BINARY"
 test -f "$APP_RESOURCES/AppIcon.icns"
 
 cat >"$INFO_PLIST" <<PLIST
@@ -110,8 +117,10 @@ cat >"$INFO_PLIST" <<PLIST
 PLIST
 
 if [[ -n "$SIGNING_IDENTITY" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$HOOK_FORWARDER_BINARY"
   codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP_BUNDLE"
 else
+  codesign --force --sign - --timestamp=none "$HOOK_FORWARDER_BINARY"
   codesign --force --sign - --timestamp=none "$APP_BUNDLE"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
