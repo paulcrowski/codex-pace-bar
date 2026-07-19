@@ -74,12 +74,15 @@ public struct UsageHistoryRepository {
         if let currentData = try? Data(contentsOf: fileURL) {
             if (try? JSONDecoder().decode([UsageSample].self, from: currentData)) != nil {
                 try writeData(currentData, backupURL)
+                secureIfPresent(backupURL)
             } else {
                 try? writeData(currentData, corruptURL)
+                secureIfPresent(corruptURL)
             }
         }
 
         try writeData(candidateData, fileURL)
+        secureIfPresent(fileURL)
         return candidate
     }
 
@@ -88,6 +91,11 @@ public struct UsageHistoryRepository {
             return nil
         }
         return try? JSONDecoder().decode([UsageSample].self, from: data)
+    }
+
+    private func secureIfPresent(_ url: URL) {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     private static func defaultBackupURL(for fileURL: URL) -> URL {

@@ -20,7 +20,8 @@ public struct CodexHookInstaller: Sendable {
     }
 
     public func install(forwarderURL: URL) throws {
-        var root = try loadConfiguration()
+        let snapshot = try loadConfigurationSnapshot()
+        var root = snapshot.root
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         for event in Self.requiredHookNames.sorted() {
             var groups = cleanedGroups(hooks[event])
@@ -34,19 +35,20 @@ public struct CodexHookInstaller: Sendable {
             hooks[event] = groups
         }
         root["hooks"] = hooks
-        try write(root)
+        try write(root, expectedData: snapshot.data)
     }
 
     public func uninstall() throws {
         guard FileManager.default.fileExists(atPath: configurationURL.path) else { return }
-        var root = try loadConfiguration()
+        let snapshot = try loadConfigurationSnapshot()
+        var root = snapshot.root
         guard var hooks = root["hooks"] as? [String: Any] else { return }
         for key in hooks.keys {
             let groups = cleanedGroups(hooks[key])
             if groups.isEmpty { hooks.removeValue(forKey: key) } else { hooks[key] = groups }
         }
         root["hooks"] = hooks
-        try write(root)
+        try write(root, expectedData: snapshot.data)
     }
 
     public func isInstalled(forwarderURL: URL) -> Bool {
@@ -70,7 +72,7 @@ public struct CodexHookInstaller: Sendable {
         }
 
         var observedHookNames: Set<String> = []
-        if let data = try? Data(contentsOf: eventFileURL) {
+        if let data = try? boundedTailData(at: eventFileURL, maximumBytes: 2 * 1_024 * 1_024) {
             for line in data.split(separator: 0x0A) {
                 guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                       let eventName = object["hook_event_name"] as? String,
@@ -87,13 +89,20 @@ public struct CodexHookInstaller: Sendable {
     }
 
     private func loadConfiguration() throws -> [String: Any] {
-        guard FileManager.default.fileExists(atPath: configurationURL.path) else { return [:] }
+        try loadConfigurationSnapshot().root
+    }
+
+    private func loadConfigurationSnapshot() throws -> ConfigurationSnapshot {
+        guard FileManager.default.fileExists(atPath: configurationURL.path) else {
+            return ConfigurationSnapshot(root: [:], data: nil)
+        }
         let data = try Data(contentsOf: configurationURL)
         guard let parsed = try? JSONSerialization.jsonObject(with: data),
-              let object = parsed as? [String: Any] else {
+              let object = parsed as? [String: Any]
+        else {
             throw CodexHookInstallerError.invalidConfiguration
         }
-        return object
+        return ConfigurationSnapshot(root: object, data: data)
     }
 
     private func cleanedGroups(_ value: Any?) -> [[String: Any]] {
@@ -117,13 +126,24 @@ public struct CodexHookInstaller: Sendable {
         group["hooks"] as? [[String: Any]] ?? []
     }
 
-    private func write(_ object: [String: Any]) throws {
+    private func write(_ object: [String: Any], expectedData: Data?) throws {
         let directory = configurationURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        let currentData = FileManager.default.fileExists(atPath: configurationURL.path)
+            ? try Data(contentsOf: configurationURL)
+            : nil
+        guard currentData == expectedData else {
+            throw CodexHookInstallerError.configurationChanged
+        }
+        if let currentData {
+            let backupURL = configurationURL.appendingPathExtension("codex-pace-bar-backup")
+            try currentData.write(to: backupURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
+        }
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configurationURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configurationURL.path)
@@ -131,6 +151,24 @@ public struct CodexHookInstaller: Sendable {
 
     private func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func boundedTailData(at url: URL, maximumBytes: UInt64) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let size = try handle.seekToEnd()
+        let start = size > maximumBytes ? size - maximumBytes : 0
+        try handle.seek(toOffset: start)
+        var data = try handle.readToEnd() ?? Data()
+        if start > 0, let newline = data.firstIndex(of: 0x0A) {
+            data.removeSubrange(data.startIndex...newline)
+        }
+        return data
+    }
+
+    private struct ConfigurationSnapshot {
+        let root: [String: Any]
+        let data: Data?
     }
 }
 
@@ -175,4 +213,5 @@ public enum CodexHookDisplayState: Equatable, Sendable {
 
 public enum CodexHookInstallerError: Error, Equatable, Sendable {
     case invalidConfiguration
+    case configurationChanged
 }

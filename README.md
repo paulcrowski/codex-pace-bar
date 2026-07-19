@@ -69,6 +69,8 @@ Settings are intentionally small:
 Settings are stored in `UserDefaults`.
 Usage history is stored locally in Application Support for 30 days. Reset metadata never deletes it; the chart derives the current continuous usage series from the retained archive. A validated rolling backup protects the previous file state.
 
+More detail is documented in [architecture](docs/ARCHITECTURE.md), [privacy and notifications](docs/PRIVACY.md), and [release instructions](docs/RELEASING.md).
+
 History-based forecasting groups observed percentage-point changes by local weekday and hour. Recent weeks receive more weight, token reset transitions are excluded, and gaps longer than 90 minutes are not assigned to a specific working period. The learned model requires at least seven days of history, 24 hours of usable observations, and one percentage point of observed usage. Until then, the app falls back to the recent-pace forecast, which requires three samples spanning 30 minutes and one percentage point of change.
 
 ## Build And Run
@@ -118,15 +120,16 @@ Ad-hoc signing is enough to seal the local app bundle, but it is not a substitut
 
 ## Privacy
 
-Codex Pace Bar is local-only.
+Codex Pace Bar is local-first: the main pace bar, usage history, and Task Monitor stay on this Mac by default.
 
-- No analytics.
-- No telemetry.
-- No external backend.
-- No network calls from this app.
+- No analytics or telemetry.
+- No external backend is required.
+- The optional Phone notifications feature sends only generic task status to the ntfy topic you explicitly pair; it is disabled by default.
+- Project name and duration are sent only when the separate "Phone notification details" option is enabled; prompts, responses, code, and full paths are never sent.
 - No OpenAI credentials are requested or stored.
 - Account and rate-limit data is read only through the local Codex app-server using your existing Codex session.
 - Usage history contains local timestamps, percentage used, limit identifiers, and reset metadata for up to 30 days.
+- Task Monitor stores local task metadata for up to 30 days and offers a delete-history action.
 
 Debug information is redacted and limited to operational details such as selected executable path, app-server status, detected window durations, percentage values, reset timestamp presence, errors, and timestamps.
 

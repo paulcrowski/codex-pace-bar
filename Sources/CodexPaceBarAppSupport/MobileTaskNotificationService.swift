@@ -7,6 +7,9 @@ public final class MobileTaskNotificationService {
 
     public static let maximumEventAge: TimeInterval = 5 * 60
     public static let defaultQuietInterval: TimeInterval = 90
+    public static let requestTimeout: TimeInterval = 10
+    public static let maximumSendAttempts = 3
+    public static let retryBaseDelay: TimeInterval = 0.05
     public static let ntfyBaseURL = URL(string: "https://ntfy.sh")!
 
     private static let deliveredKeysDefaultsKey = "mobileTaskNotificationDeliveredKeys"
@@ -252,18 +255,41 @@ public final class MobileTaskNotificationService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = Data(message.body.utf8)
+        request.timeoutInterval = Self.requestTimeout
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue(message.title, forHTTPHeaderField: "Title")
         request.setValue(message.priority, forHTTPHeaderField: "Priority")
         request.setValue(message.tags, forHTTPHeaderField: "Tags")
 
-        do {
-            let (_, response) = try await sender(request)
-            guard let response = response as? HTTPURLResponse else { return false }
-            return (200..<300).contains(response.statusCode)
-        } catch {
-            return false
+        for attempt in 0..<Self.maximumSendAttempts {
+            do {
+                try Task.checkCancellation()
+                let (_, response) = try await sender(request)
+                guard let response = response as? HTTPURLResponse else { return false }
+                if (200..<300).contains(response.statusCode) {
+                    return true
+                }
+                guard Self.shouldRetry(statusCode: response.statusCode), attempt + 1 < Self.maximumSendAttempts else {
+                    return false
+                }
+            } catch is CancellationError {
+                return false
+            } catch {
+                guard attempt + 1 < Self.maximumSendAttempts else { return false }
+            }
+
+            let delay = Self.retryBaseDelay * Double(1 << attempt)
+            do {
+                try await Task.sleep(for: .milliseconds(Int(delay * 1_000)))
+            } catch {
+                return false
+            }
         }
+        return false
+    }
+
+    private static func shouldRetry(statusCode: Int) -> Bool {
+        statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500
     }
 
     private func message(for task: CodexTaskActivity, includeDetails: Bool = false) -> Message? {

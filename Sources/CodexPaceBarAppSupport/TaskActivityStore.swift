@@ -3,6 +3,9 @@ import Foundation
 import SQLite3
 
 public actor TaskActivityStore {
+    public static let retentionDuration: TimeInterval = 30 * 24 * 60 * 60
+    public static let checkInRetentionDuration: TimeInterval = 90 * 24 * 60 * 60
+
     private static let schema = """
     CREATE TABLE IF NOT EXISTS task_activity (
         task_key TEXT PRIMARY KEY,
@@ -78,6 +81,11 @@ public actor TaskActivityStore {
             try Self.execute("PRAGMA busy_timeout=1000;", on: database)
             try Self.execute("PRAGMA cache_size=-2048;", on: database)
             try Self.execute("PRAGMA wal_autocheckpoint=1000;", on: database)
+            try Self.prune(
+                olderThan: Date().addingTimeInterval(-Self.retentionDuration),
+                checkInsOlderThan: Date().addingTimeInterval(-Self.checkInRetentionDuration),
+                in: database
+            )
             try Self.secureDatabaseFiles(at: databaseURL)
             self.database = SQLiteConnection(pointer: database)
             if loadExisting {
@@ -237,6 +245,16 @@ public actor TaskActivityStore {
         try Self.loadCheckIns(since: date, from: database.pointer)
     }
 
+    public func clearHistory() throws {
+        try Self.execute(
+            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; PRAGMA wal_checkpoint(TRUNCATE);",
+            on: database.pointer
+        )
+        activities.removeAll()
+        contexts.removeAll()
+        currentTurnID = nil
+    }
+
     private func taskKey(for turnID: String) -> String {
         "\(sessionID):\(turnID)"
     }
@@ -354,6 +372,26 @@ public actor TaskActivityStore {
                 ofItemAtPath: url.path
             )
         }
+    }
+
+    private static func prune(
+        olderThan cutoff: Date,
+        checkInsOlderThan checkInCutoff: Date,
+        in database: OpaquePointer
+    ) throws {
+        let taskCutoff = cutoff.timeIntervalSince1970
+        let checkInCutoff = checkInCutoff.timeIntervalSince1970
+        try execute(
+            """
+            DELETE FROM task_status_event
+            WHERE occurred_at < \(taskCutoff);
+            DELETE FROM task_activity
+            WHERE COALESCE(last_event_at, completed_at, started_at, 0) < \(taskCutoff)
+              AND status NOT IN ('queued', 'working', 'needsApproval', 'needsInput');
+            DELETE FROM daily_work_checkin WHERE day_start < \(checkInCutoff);
+            """,
+            on: database
+        )
     }
 
     private struct DeduplicationResult {

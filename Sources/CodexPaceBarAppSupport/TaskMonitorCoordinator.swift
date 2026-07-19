@@ -25,6 +25,7 @@ public final class TaskMonitorCoordinator {
     private var watchers: [URL: CodexSessionLogFileWatcher] = [:]
     private var directoryWatchers: [URL: CodexSessionLogDirectoryWatcher] = [:]
     private var hookEventWatcher: CodexHookEventWatcher?
+    private var rescanTask: Task<Void, Never>?
     private var isRunning = false
 
     public var onChange: (() -> Void)?
@@ -70,8 +71,8 @@ public final class TaskMonitorCoordinator {
         }
         isRunning = true
         do {
-            try rescan()
             try startHookEventWatcher()
+            try rescan()
         } catch {
             isRunning = false
             throw error
@@ -82,19 +83,47 @@ public final class TaskMonitorCoordinator {
         guard isRunning else {
             return
         }
-        let files = try catalog.recentLogFiles()
+        rescanTask?.cancel()
+        let catalog = self.catalog
+        rescanTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                let files = try catalog.recentLogFiles()
+                guard !Task.isCancelled else { return }
+                await self?.applyCatalogFiles(files)
+            } catch {
+                await self?.report(error)
+            }
+        }
+    }
+
+    private func applyCatalogFiles(_ files: [URL]) {
+        guard isRunning else { return }
         let desiredFiles = Set(files)
         for fileURL in Array(watchers.keys) where !desiredFiles.contains(fileURL) {
             detach(fileURL: fileURL)
         }
         for fileURL in files {
-            try attach(fileURL: fileURL)
+            do {
+                try attach(fileURL: fileURL)
+            } catch {
+                report(error)
+            }
         }
-        try synchronizeDirectoryWatchers(for: files)
+        do {
+            try synchronizeDirectoryWatchers(for: files)
+        } catch {
+            report(error)
+        }
+    }
+
+    private func report(_ error: Error) {
+        onError?(error)
     }
 
     public func stop() {
         isRunning = false
+        rescanTask?.cancel()
+        rescanTask = nil
         directoryWatchers.values.forEach { $0.stop() }
         directoryWatchers.removeAll()
         watchers.values.forEach { $0.stop() }
@@ -114,6 +143,11 @@ public final class TaskMonitorCoordinator {
 
     public func checkIns(since date: Date) async throws -> [CodexDailyWorkCheckIn] {
         try await queryStore.checkIns(since: date)
+    }
+
+    public func clearHistory() async throws {
+        try await queryStore.clearHistory()
+        onChange?()
     }
 
     public func saveCheckIn(

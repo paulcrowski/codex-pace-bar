@@ -78,6 +78,22 @@ struct CodexSessionLogCatalogTests {
         #expect(files.count == CodexSessionLogCatalog.defaultFileLimit)
     }
 
+    @Test
+    func skipsOversizedLogsBeforeAttachingWatchers() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexPaceBarTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let oversized = directory.appendingPathComponent("oversized.jsonl")
+        try Data(repeating: 0x20, count: 128).write(to: oversized)
+        let files = try CodexSessionLogCatalog(rootURL: directory)
+            .recentLogFiles(now: Date(), maximumAge: 60, maximumFileSize: 64)
+
+        #expect(files.isEmpty)
+    }
+
     private func setModificationDate(_ date: Date, for url: URL) throws {
         try FileManager.default.setAttributes(
             [.modificationDate: date],
