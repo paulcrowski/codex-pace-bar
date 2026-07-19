@@ -4,7 +4,7 @@ import Foundation
 import Testing
 
 @MainActor
-@Suite
+@Suite(.serialized)
 struct RefreshCoordinatorTests {
     @Test
     func timeoutBecomesRefreshFailure() async throws {

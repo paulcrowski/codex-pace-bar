@@ -17,6 +17,8 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+HOOK_FORWARDER_NAME="CodexPaceBarHookForwarder"
+HOOK_FORWARDER_BINARY="$APP_MACOS/$HOOK_FORWARDER_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/Resources/AppIcon.icns"
 
@@ -31,9 +33,9 @@ case "$BUILD_CONFIGURATION" in
 esac
 
 case "$MODE" in
-  run|--build-only|build-only|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify) ;;
+  run|--build-only|build-only|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--ui-proof|ui-proof) ;;
   *)
-    echo "usage: $0 [run|--build-only|--verify|--debug|--logs|--telemetry]" >&2
+    echo "usage: $0 [run|--build-only|--verify|--ui-proof|--debug|--logs|--telemetry]" >&2
     exit 2
     ;;
 esac
@@ -48,17 +50,23 @@ fi
 
 if [[ "$BUILD_CONFIGURATION" == "release" ]]; then
   swift build -c release --product "$APP_NAME"
+  swift build -c release --product "$HOOK_FORWARDER_NAME"
   BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
+  HOOK_BUILD_BINARY="$(swift build -c release --show-bin-path)/$HOOK_FORWARDER_NAME"
 else
   swift build --product "$APP_NAME"
+  swift build --product "$HOOK_FORWARDER_NAME"
   BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+  HOOK_BUILD_BINARY="$(swift build --show-bin-path)/$HOOK_FORWARDER_NAME"
 fi
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
+cp "$HOOK_BUILD_BINARY" "$HOOK_FORWARDER_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/AppIcon.icns"
 chmod +x "$APP_BINARY"
+chmod +x "$HOOK_FORWARDER_BINARY"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -93,13 +101,15 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+codesign --force --sign - --timestamp=none "$HOOK_FORWARDER_BINARY"
 codesign --force --sign - --timestamp=none "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 test -x "$APP_BINARY"
+test -x "$HOOK_FORWARDER_BINARY"
 test -f "$APP_RESOURCES/AppIcon.icns"
 
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  /usr/bin/open -n "$APP_BUNDLE" --args "$@"
 }
 
 case "$MODE" in
@@ -125,5 +135,8 @@ case "$MODE" in
     sleep 2
     test -x "$APP_BINARY"
     pgrep -x "$APP_NAME" >/dev/null
+    ;;
+  --ui-proof|ui-proof)
+    open_app --ui-proof --show-task-monitor
     ;;
 esac

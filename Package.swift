@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v15)
     ],
     products: [
-        .executable(name: "CodexPaceBar", targets: ["CodexPaceBar"])
+        .executable(name: "CodexPaceBar", targets: ["CodexPaceBar"]),
+        .executable(name: "CodexPaceBarHookForwarder", targets: ["CodexPaceBarHookForwarder"])
     ],
     targets: [
         .target(
@@ -24,6 +25,10 @@ let package = Package(
             name: "CodexPaceBar",
             dependencies: ["CodexPaceBarCore", "CodexPaceBarAppSupport"],
             path: "Sources/CodexPaceBar"
+        ),
+        .executableTarget(
+            name: "CodexPaceBarHookForwarder",
+            path: "Sources/CodexPaceBarHookForwarder"
         ),
         .testTarget(
             name: "CodexPaceBarTests",
