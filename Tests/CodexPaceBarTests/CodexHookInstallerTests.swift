@@ -15,6 +15,8 @@ struct CodexHookInstallerTests {
         let installer = CodexHookInstaller(configurationURL: config, eventFileURL: eventFile)
 
         try installer.install(forwarderURL: forwarder)
+        let backupURL = config.appendingPathExtension("codex-pace-bar-backup")
+        #expect(FileManager.default.fileExists(atPath: backupURL.path))
         #expect(installer.isInstalled(forwarderURL: forwarder))
         var status = installer.setupStatus(forwarderURL: forwarder)
         #expect(status.isConfigured)

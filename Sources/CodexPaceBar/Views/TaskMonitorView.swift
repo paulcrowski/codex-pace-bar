@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TaskMonitorView: View {
     @Bindable var model: TaskMonitorViewModel
+    @State private var showsClearHistoryConfirmation = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -112,9 +113,29 @@ struct TaskMonitorView: View {
                     .foregroundStyle(needsYou > 0 ? .orange : .secondary)
             }
             Spacer()
-            Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
+            HStack(spacing: 8) {
+                Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Refresh tasks")
+                Button { showsClearHistoryConfirmation = true } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Delete local task history")
+                .help("Delete local task history")
+            }
                 .buttonStyle(.borderless)
                 .help("Refresh list")
+        }
+        .confirmationDialog(
+            "Delete local task history?",
+            isPresented: $showsClearHistoryConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete history", role: .destructive) { model.clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes stored task activity, status events, and check-ins from this Mac.")
         }
     }
 

@@ -22,13 +22,12 @@ struct SettingsView: View {
                 subtitle: launchAtLogin.statusMessage ?? "Open Codex Pace Bar after signing in"
             ) {
                 Toggle(
-                    "",
+                    "Launch at login",
                     isOn: Binding(
                         get: { launchAtLogin.isEnabled },
                         set: { launchAtLogin.setEnabled($0) }
                     )
                 )
-                .labelsHidden()
             }
 
             SettingsDivider()
@@ -38,8 +37,7 @@ struct SettingsView: View {
                 title: "Usage notifications",
                 subtitle: "Warns about high pace or forecast exhaustion; maximum once per day."
             ) {
-                Toggle("", isOn: $settings.notificationsEnabled)
-                    .labelsHidden()
+                Toggle("Usage notifications", isOn: $settings.notificationsEnabled)
             }
 
             SettingsDivider()
@@ -49,8 +47,7 @@ struct SettingsView: View {
                 title: "History-based forecast",
                 subtitle: "Forecasts limit usage from the last 30 days."
             ) {
-                Toggle("", isOn: $settings.historyBasedForecastEnabled)
-                    .labelsHidden()
+                Toggle("History-based forecast", isOn: $settings.historyBasedForecastEnabled)
             }
 
             SettingsDivider()
@@ -128,8 +125,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.bordered)
                     }
-                    Toggle("", isOn: $settings.taskMonitorEnabled)
-                        .labelsHidden()
+                    Toggle("Task monitor", isOn: $settings.taskMonitorEnabled)
                 }
             }
 
@@ -157,8 +153,7 @@ struct SettingsView: View {
                     ? "Shows active tasks and ETA in the main menu."
                     : "Enable Task Monitor to use this feature."
             ) {
-                Toggle("", isOn: $settings.mainTaskSummaryEnabled)
-                    .labelsHidden()
+                Toggle("Task summary in main menu", isOn: $settings.mainTaskSummaryEnabled)
                     .disabled(!settings.taskMonitorEnabled)
             }
             .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
@@ -178,7 +173,7 @@ struct SettingsView: View {
                             .buttonStyle(.bordered)
                     }
                     Toggle(
-                        "",
+                        "Phone notifications",
                         isOn: Binding(
                             get: { settings.mobileTaskNotificationsEnabled },
                             set: { enabled in
@@ -187,7 +182,6 @@ struct SettingsView: View {
                             }
                         )
                     )
-                        .labelsHidden()
                         .disabled(!settings.taskMonitorEnabled)
                 }
             }
@@ -202,8 +196,7 @@ struct SettingsView: View {
                     ? "Includes project name and duration. Prompts always stay private."
                     : "Enable Phone notifications to add safe task context."
             ) {
-                Toggle("", isOn: $settings.mobileNotificationDetailsEnabled)
-                    .labelsHidden()
+                Toggle("Phone notification details", isOn: $settings.mobileNotificationDetailsEnabled)
                     .disabled(!settings.taskMonitorEnabled || !settings.mobileTaskNotificationsEnabled)
             }
             .opacity(settings.taskMonitorEnabled && settings.mobileTaskNotificationsEnabled ? 1 : 0.55)
@@ -217,8 +210,7 @@ struct SettingsView: View {
                     ? "Batches finished alerts after 90 seconds of quiet. Needs you stays instant."
                     : "Enable Phone notifications to silence goal and swarm completion noise."
             ) {
-                Toggle("", isOn: $settings.silentGoalsAndSwarmsEnabled)
-                    .labelsHidden()
+                Toggle("Swarms and goals silent", isOn: $settings.silentGoalsAndSwarmsEnabled)
                     .disabled(!settings.taskMonitorEnabled || !settings.mobileTaskNotificationsEnabled)
             }
             .opacity(settings.taskMonitorEnabled && settings.mobileTaskNotificationsEnabled ? 1 : 0.55)
@@ -232,8 +224,7 @@ struct SettingsView: View {
                     ? "Alerts when a task needs approval or input."
                     : "Enable Task Monitor to use this feature."
             ) {
-                Toggle("", isOn: $settings.taskNotificationsEnabled)
-                    .labelsHidden()
+                Toggle("Task notifications", isOn: $settings.taskNotificationsEnabled)
                     .disabled(!settings.taskMonitorEnabled)
             }
             .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
@@ -247,8 +238,7 @@ struct SettingsView: View {
                     ? "Describes work continuity and parallel tasks."
                     : "Enable Task Monitor to use this feature."
             ) {
-                Toggle("", isOn: $settings.focusLoadEnabled)
-                    .labelsHidden()
+                Toggle("Work rhythm and Focus Load", isOn: $settings.focusLoadEnabled)
                     .disabled(!settings.taskMonitorEnabled)
             }
             .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
@@ -260,7 +250,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.visible)
-        .frame(minWidth: 560, idealWidth: 620, minHeight: 520, idealHeight: 760)
+        .frame(minWidth: 420, idealWidth: 620, minHeight: 520, idealHeight: 760)
         .background {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)
@@ -580,7 +570,7 @@ private struct MobileNotificationPairingView: View {
                 testButton
             }
 
-            Text("Treat the topic like a password: create a new pairing code if it was shared or shown in a screenshot. Only generic task status is sent. Prompts, responses, code, paths, and project names stay on this Mac. The public ntfy relay still handles the notification text and private topic.")
+            Text("Treat the topic like a password: create a new pairing code if it was shared or shown in a screenshot. Only generic task status is sent by default. If you enable Phone notification details, the project name and duration are also sent; prompts, responses, code, and full paths stay on this Mac. The public ntfy relay handles the notification text and private topic.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

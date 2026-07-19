@@ -148,6 +148,28 @@ final class TaskMonitorViewModel {
         return checkIns.first { Calendar.current.isDate($0.day, inSameDayAs: day) }?.rating
     }
 
+    func clearHistory() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await coordinator.clearHistory()
+                tasks = []
+                events = []
+                checkIns = []
+                todaySummary = CodexTaskDailySummary(
+                    activeWallTime: 0,
+                    agentHours: 0,
+                    waitingForUser: 0,
+                    completedTasks: 0
+                )
+                lastReloadDate = Date()
+            } catch {
+                healthTracker.markStale(message: Self.userFacingErrorMessage(for: error))
+                health = healthTracker.state
+            }
+        }
+    }
+
     func canNavigate(to task: CodexTaskActivity) -> Bool {
         navigator.bundleIdentifier(for: task) != nil
     }

@@ -6,6 +6,28 @@ import Testing
 
 struct TaskActivityStoreTests {
     @Test
+    func clearHistoryRemovesTasksEventsAndCheckIns() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+        let now = Date()
+        try await store.apply(.turnStarted(turnID: "turn", startedAt: now))
+        try await store.apply(.turnCompleted(
+            turnID: "turn",
+            completedAt: now.addingTimeInterval(10),
+            duration: 10,
+            timeToFirstToken: nil
+        ))
+        try await store.saveCheckIn(rating: .calm, rhythmScore: 50, day: now)
+
+        try await store.clearHistory()
+
+        #expect(try await store.tasks().isEmpty)
+        #expect(try await store.statusEvents(since: now.addingTimeInterval(-1)).isEmpty)
+        #expect(try await store.checkIns(since: now.addingTimeInterval(-1)).isEmpty)
+    }
+
+    @Test
     func databaseFilesUseOwnerOnlyPermissions() async throws {
         let databaseURL = try makeDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
