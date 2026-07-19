@@ -8,6 +8,7 @@ final class TaskMonitorNotificationController {
     private let notificationCenter: UNUserNotificationCenter
     private let mobileService: MobileTaskNotificationService
     private var deliveredKeys = Set<String>()
+    private var inFlightLocalKeys = Set<String>()
     private var mobileBaselinePrepared = false
     private var previousMobileEnabled = false
     private var previousMobileTopic = ""
@@ -75,9 +76,10 @@ final class TaskMonitorNotificationController {
         for task in tasks where task.status == .needsApproval || task.status == .needsInput {
             let key = "\(task.id):\(task.status.rawValue):\(task.lastEventAt?.timeIntervalSince1970 ?? 0)"
             guard !deliveredKeys.contains(key),
+                  !inFlightLocalKeys.contains(key),
                   now.timeIntervalSince(task.lastEventAt ?? .distantPast) < 5 * 60
             else { continue }
-            deliveredKeys.insert(key)
+            inFlightLocalKeys.insert(key)
             Task { [notificationCenter] in
                 let settings = await notificationCenter.notificationSettings()
                 let allowed: Bool
@@ -87,16 +89,27 @@ final class TaskMonitorNotificationController {
                     allowed = (try? await notificationCenter.requestAuthorization(options: [.alert])) ?? false
                 default: allowed = false
                 }
-                guard allowed else { return }
+                guard allowed else {
+                    _ = await MainActor.run { self.inFlightLocalKeys.remove(key) }
+                    return
+                }
                 let content = UNMutableNotificationContent()
                 content.title = "Codex needs you"
                 content.body = task.workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent }
                     ?? "A task is waiting for a response."
-                try? await notificationCenter.add(UNNotificationRequest(
+                do {
+                    try await notificationCenter.add(UNNotificationRequest(
                     identifier: "codex-task-needs-user-\(UUID().uuidString)",
                     content: content,
                     trigger: nil
-                ))
+                    ))
+                    await MainActor.run {
+                        self.inFlightLocalKeys.remove(key)
+                        self.deliveredKeys.insert(key)
+                    }
+                } catch {
+                    _ = await MainActor.run { self.inFlightLocalKeys.remove(key) }
+                }
             }
         }
     }
