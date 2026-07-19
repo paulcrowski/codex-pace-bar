@@ -2,6 +2,9 @@ import Foundation
 
 public struct CodexHookInstaller: Sendable {
     public static let marker = "CodexPaceBarHookForwarder"
+    public static let requiredHookNames: Set<String> = [
+        "PermissionRequest", "UserPromptSubmit", "Stop"
+    ]
     public let configurationURL: URL
     public let eventFileURL: URL
 
@@ -19,7 +22,7 @@ public struct CodexHookInstaller: Sendable {
     public func install(forwarderURL: URL) throws {
         var root = try loadConfiguration()
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        for event in ["UserPromptSubmit", "PermissionRequest", "Stop"] {
+        for event in Self.requiredHookNames.sorted() {
             var groups = cleanedGroups(hooks[event])
             groups.append([
                 "hooks": [[
@@ -47,17 +50,40 @@ public struct CodexHookInstaller: Sendable {
     }
 
     public func isInstalled(forwarderURL: URL) -> Bool {
-        guard let root = try? loadConfiguration(),
-              let hooks = root["hooks"] as? [String: Any]
-        else { return false }
+        setupStatus(forwarderURL: forwarderURL).isConfigured
+    }
+
+    public func setupStatus(forwarderURL: URL) -> CodexHookSetupStatus {
         let expected = forwarderURL.path
-        return hooks.values.contains { value in
-            groups(from: value).contains { group in
-                handlers(from: group).contains { handler in
-                    (handler["command"] as? String)?.contains(expected) == true
+        let installedHookNames: Set<String>
+        if let root = try? loadConfiguration(),
+           let hooks = root["hooks"] as? [String: Any] {
+            installedHookNames = Set(Self.requiredHookNames.filter { eventName in
+                groups(from: hooks[eventName]).contains { group in
+                    handlers(from: group).contains { handler in
+                        (handler["command"] as? String)?.contains(expected) == true
+                    }
                 }
+            })
+        } else {
+            installedHookNames = []
+        }
+
+        var observedHookNames: Set<String> = []
+        if let data = try? Data(contentsOf: eventFileURL) {
+            for line in data.split(separator: 0x0A) {
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                      let eventName = object["hook_event_name"] as? String,
+                      Self.requiredHookNames.contains(eventName)
+                else { continue }
+                observedHookNames.insert(eventName)
             }
         }
+
+        return CodexHookSetupStatus(
+            installedHookNames: installedHookNames,
+            observedHookNames: observedHookNames
+        )
     }
 
     private func loadConfiguration() throws -> [String: Any] {
@@ -106,6 +132,45 @@ public struct CodexHookInstaller: Sendable {
     private func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
+}
+
+public struct CodexHookSetupStatus: Equatable, Sendable {
+    public let installedHookNames: Set<String>
+    public let observedHookNames: Set<String>
+
+    public init(installedHookNames: Set<String>, observedHookNames: Set<String>) {
+        self.installedHookNames = installedHookNames
+        self.observedHookNames = observedHookNames
+    }
+
+    public static let notConfigured = CodexHookSetupStatus(
+        installedHookNames: [],
+        observedHookNames: []
+    )
+
+    public var isConfigured: Bool {
+        installedHookNames.isSuperset(of: CodexHookInstaller.requiredHookNames)
+    }
+
+    public var isReceivingEvents: Bool {
+        !observedHookNames.isEmpty
+    }
+
+    public var hasObservedAllRequiredHooks: Bool {
+        observedHookNames.isSuperset(of: CodexHookInstaller.requiredHookNames)
+    }
+
+    public func displayState(for hookName: String) -> CodexHookDisplayState {
+        if observedHookNames.contains(hookName) { return .working }
+        if installedHookNames.contains(hookName) { return .installed }
+        return .notInstalled
+    }
+}
+
+public enum CodexHookDisplayState: Equatable, Sendable {
+    case notInstalled
+    case installed
+    case working
 }
 
 public enum CodexHookInstallerError: Error, Equatable, Sendable {

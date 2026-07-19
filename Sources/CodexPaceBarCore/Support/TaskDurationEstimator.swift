@@ -57,7 +57,7 @@ public struct CodexTaskDurationEstimator: Sendable {
         now: Date,
         history: [CodexTaskActivity]
     ) -> CodexTaskDurationEstimate? {
-        guard current.status == .working || current.status == .queued else {
+        guard current.isRunning else {
             return nil
         }
         let currentWaiting = current.waitingDuration

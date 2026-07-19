@@ -4,18 +4,33 @@ import Testing
 
 struct FocusLoadEstimatorTests {
     @Test
-    func workRhythmUsesWordsAndCalibratesOnlyAfterEnoughRatedDays() {
+    func workRhythmReportsLearningProgressUntilAWeekIsRated() {
         let now = Date()
-        let checkIns = (0..<20).map { index in
+        let firstSix = (0..<6).map { index in
             CodexDailyWorkCheckIn(
                 day: now.addingTimeInterval(TimeInterval(-index * 86_400)),
                 rating: index.isMultiple(of: 3) ? .tooMuch : .intense,
                 rhythmScore: 60 + index % 10
             )
         }
+        let learning = CodexWorkRhythmEstimator().estimate(
+            activities: [],
+            checkIns: firstSix,
+            now: now
+        )
+
+        #expect(!learning.isPersonallyCalibrated)
+        #expect(learning.calibrationDays == 6)
+        #expect(learning.calibrationTarget == 7)
+        #expect(learning.detail == "Rate 7 workdays so Pace Bar can learn what feels calm or intense for you. 6/7 done · light activity now.")
+
         let estimate = CodexWorkRhythmEstimator().estimate(
             activities: [],
-            checkIns: checkIns,
+            checkIns: firstSix + [CodexDailyWorkCheckIn(
+                day: now.addingTimeInterval(-6 * 86_400),
+                rating: .intense,
+                rhythmScore: 68
+            )],
             now: now
         )
         #expect(estimate.level == .calm)

@@ -10,10 +10,7 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
     private let model: TaskMonitorViewModel
     private var outsideClickMonitor: Any?
 
-    init(
-        model: TaskMonitorViewModel,
-        onTasksReloaded: @escaping ([CodexTaskActivity]) -> Void
-    ) {
+    init(model: TaskMonitorViewModel) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         self.model = model
@@ -33,8 +30,9 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
             button.target = self
             button.action = #selector(togglePopover)
         }
+        let previousReloadHandler = model.onTasksReloaded
         model.onTasksReloaded = { [weak self] tasks in
-            onTasksReloaded(tasks)
+            previousReloadHandler?(tasks)
             self?.updateStatusItem(tasks: tasks)
         }
     }
@@ -46,7 +44,7 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
             now.timeIntervalSince($0.lastEventAt ?? $0.startedAt ?? .distantPast) <= 2 * 60 * 60
         }
         let needs = fresh.filter { $0.status.isWaitingForUser }.count
-        let working = fresh.filter { $0.status == .working || $0.status == .queued }.count
+        let working = fresh.filter(\.isRunning).count
         button.imagePosition = (needs + working) > 0 ? .imageLeading : .imageOnly
         button.title = needs > 0 ? " !\(needs)" : (working > 0 ? " \(working)" : "")
         button.toolTip = needs > 0 ? "Codex needs you" : "Codex tasks"

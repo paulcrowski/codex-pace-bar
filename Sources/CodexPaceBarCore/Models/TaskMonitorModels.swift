@@ -72,6 +72,21 @@ public struct CodexTaskActivity: Equatable, Identifiable, Sendable {
         "\(sessionID):\(turnID)"
     }
 
+    public var projectDisplayName: String {
+        guard let workingDirectory else { return "Codex task" }
+        let name = URL(fileURLWithPath: workingDirectory).lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Codex task" : name
+    }
+
+    public var isRunning: Bool {
+        status == .working || (status == .queued && startedAt != nil)
+    }
+
+    public var visibleStatus: CodexTaskStatus {
+        isRunning ? .working : status
+    }
+
     public init(
         sessionID: String,
         turnID: String,

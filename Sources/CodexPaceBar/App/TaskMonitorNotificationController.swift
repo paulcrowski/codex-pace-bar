@@ -1,18 +1,77 @@
 import CodexPaceBarCore
+import CodexPaceBarAppSupport
 import Foundation
 @preconcurrency import UserNotifications
 
 @MainActor
 final class TaskMonitorNotificationController {
     private let notificationCenter: UNUserNotificationCenter
+    private let mobileService: MobileTaskNotificationService
     private var deliveredKeys = Set<String>()
+    private var mobileBaselinePrepared = false
+    private var previousMobileEnabled = false
+    private var previousMobileTopic = ""
+    private var previousMobileDetailsEnabled = false
+    private var previousSilentGoalsAndSwarmsEnabled = false
 
-    init(notificationCenter: UNUserNotificationCenter = .current()) {
+    init(
+        notificationCenter: UNUserNotificationCenter = .current(),
+        mobileService: MobileTaskNotificationService = MobileTaskNotificationService()
+    ) {
         self.notificationCenter = notificationCenter
+        self.mobileService = mobileService
     }
 
-    func notifyIfNeeded(for tasks: [CodexTaskActivity], enabled: Bool, now: Date = Date()) {
-        guard enabled else { return }
+    func notifyIfNeeded(
+        for tasks: [CodexTaskActivity],
+        localEnabled: Bool,
+        mobileEnabled: Bool,
+        mobileTopic: String,
+        mobileDetailsEnabled: Bool,
+        silentGoalsAndSwarmsEnabled: Bool,
+        now: Date = Date()
+    ) {
+        if localEnabled {
+            deliverLocalNotificationsIfNeeded(for: tasks, now: now)
+        }
+
+        let configurationChanged = mobileEnabled != previousMobileEnabled
+            || mobileTopic != previousMobileTopic
+            || mobileDetailsEnabled != previousMobileDetailsEnabled
+            || silentGoalsAndSwarmsEnabled != previousSilentGoalsAndSwarmsEnabled
+        previousMobileEnabled = mobileEnabled
+        previousMobileTopic = mobileTopic
+        previousMobileDetailsEnabled = mobileDetailsEnabled
+        previousSilentGoalsAndSwarmsEnabled = silentGoalsAndSwarmsEnabled
+        if !mobileBaselinePrepared || configurationChanged {
+            mobileService.discardPendingCompletionBatch()
+            mobileService.prime(with: tasks)
+            mobileBaselinePrepared = true
+            return
+        }
+
+        Task { [mobileService] in
+            await mobileService.notifyIfNeeded(
+                for: tasks,
+                enabled: mobileEnabled,
+                topic: mobileTopic,
+                includeDetails: mobileDetailsEnabled,
+                silentGoalsAndSwarmsEnabled: silentGoalsAndSwarmsEnabled,
+                now: now
+            )
+        }
+    }
+
+    func resetMobileBaseline() {
+        mobileBaselinePrepared = false
+        mobileService.discardPendingCompletionBatch()
+    }
+
+    func sendMobileTest(topic: String) async -> Bool {
+        await mobileService.sendTest(topic: topic)
+    }
+
+    private func deliverLocalNotificationsIfNeeded(for tasks: [CodexTaskActivity], now: Date) {
         for task in tasks where task.status == .needsApproval || task.status == .needsInput {
             let key = "\(task.id):\(task.status.rawValue):\(task.lastEventAt?.timeIntervalSince1970 ?? 0)"
             guard !deliveredKeys.contains(key),

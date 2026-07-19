@@ -92,6 +92,31 @@ struct TaskActivityStoreTests {
     }
 
     @Test
+    func laterTurnContextBackfillsMissingProjectMetadata() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+
+        try await store.apply(.turnStarted(
+            turnID: "019f78ed-4da6-7fe0-b12a-8e92ebefd000",
+            startedAt: Date(timeIntervalSince1970: 1_784_372_923)
+        ))
+        #expect(try await store.tasks().first?.workingDirectory == nil)
+
+        try await store.apply(.turnContext(
+            turnID: "019f78ed-4da6-7fe0-b12a-8e92ebefd000",
+            model: "gpt-5.6",
+            effort: "high",
+            workingDirectory: "/work/codex-pace-bar"
+        ))
+
+        let task = try #require(await store.tasks().first)
+        #expect(task.workingDirectory == "/work/codex-pace-bar")
+        #expect(task.model == "gpt-5.6")
+        #expect(task.effort == "high")
+    }
+
+    @Test
     func restartLoadsTheSameMetadata() async throws {
         let databaseURL = try makeDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL) }

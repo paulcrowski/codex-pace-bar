@@ -32,7 +32,7 @@ public struct CodexHookEventParser: Sendable {
 
         switch eventName {
         case "UserPromptSubmit":
-            events.append(.turnStatusChanged(turnID: turnID, status: .queued, occurredAt: occurredAt))
+            events.append(.turnStatusChanged(turnID: turnID, status: .working, occurredAt: occurredAt))
         case "PermissionRequest":
             events.append(.turnStatusChanged(turnID: turnID, status: .needsApproval, occurredAt: occurredAt))
         case "Stop":

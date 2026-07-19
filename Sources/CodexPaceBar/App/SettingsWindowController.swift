@@ -7,16 +7,22 @@ final class SettingsWindowController {
     private let settings: SettingsStore
     private let launchAtLogin: LaunchAtLoginController
     private let onOpenTaskMonitor: () -> Void
+    private let onGetTaskHookStatus: () -> CodexHookSetupStatus
+    private let onSendMobileNotificationTest: () async -> Bool
     private var window: NSWindow?
 
     init(
         settings: SettingsStore,
         launchAtLogin: LaunchAtLoginController,
-        onOpenTaskMonitor: @escaping () -> Void
+        onOpenTaskMonitor: @escaping () -> Void,
+        onGetTaskHookStatus: @escaping () -> CodexHookSetupStatus,
+        onSendMobileNotificationTest: @escaping () async -> Bool
     ) {
         self.settings = settings
         self.launchAtLogin = launchAtLogin
         self.onOpenTaskMonitor = onOpenTaskMonitor
+        self.onGetTaskHookStatus = onGetTaskHookStatus
+        self.onSendMobileNotificationTest = onSendMobileNotificationTest
     }
 
     func show() {
@@ -32,14 +38,20 @@ final class SettingsWindowController {
             rootView: SettingsView(
                 settings: settings,
                 launchAtLogin: launchAtLogin,
-                onOpenTaskMonitor: onOpenTaskMonitor
+                onOpenTaskMonitor: onOpenTaskMonitor,
+                onGetTaskHookStatus: onGetTaskHookStatus,
+                onSendMobileNotificationTest: onSendMobileNotificationTest
             )
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Settings"
-        window.styleMask = [.titled, .closable]
+        window.styleMask = [.titled, .closable, .resizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 620, height: 1000))
+        let visibleHeight = NSScreen.main?.visibleFrame.height ?? 900
+        let initialHeight = max(560, min(760, visibleHeight - 100))
+        window.contentMinSize = NSSize(width: 560, height: 520)
+        window.contentMaxSize = NSSize(width: 760, height: max(560, visibleHeight))
+        window.setContentSize(NSSize(width: 620, height: initialHeight))
         window.center()
         self.window = window
         window.makeKeyAndOrderFront(nil)

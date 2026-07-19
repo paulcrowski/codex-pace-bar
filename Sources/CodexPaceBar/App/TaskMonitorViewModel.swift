@@ -9,6 +9,7 @@ final class TaskMonitorViewModel {
     private let coordinator: TaskMonitorCoordinator
     private let estimator = CodexTaskDurationEstimator()
     private let rhythmEstimator = CodexWorkRhythmEstimator()
+    private let checkInPolicy = CodexDailyCheckInPolicy()
     private let summaryCalculator = CodexTaskDailySummaryCalculator()
     private let navigator = TaskNavigator()
     private var healthTracker = CodexTaskMonitorHealthTracker()
@@ -86,7 +87,7 @@ final class TaskMonitorViewModel {
     }
 
     func working(at now: Date) -> [CodexTaskActivity] {
-        freshTasks(at: now).filter { $0.status == .working || $0.status == .queued }
+        freshTasks(at: now).filter(\.isRunning)
     }
 
     func hasActiveTasks(at now: Date) -> Bool {
@@ -113,15 +114,37 @@ final class TaskMonitorViewModel {
         return rhythmEstimator.estimate(activities: tasks, checkIns: checkIns, now: now)
     }
 
-    func saveCheckIn(_ rating: CodexDailyWorkRating, at now: Date) {
-        let score = workRhythm(at: now)?.source.score
+    func checkInPrompt(at now: Date) -> CodexDailyCheckInPrompt? {
+        guard focusLoadEnabled else { return nil }
+        return checkInPolicy.prompt(activities: tasks, checkIns: checkIns, now: now)
+    }
+
+    func saveCheckIn(_ rating: CodexDailyWorkRating, for prompt: CodexDailyCheckInPrompt) {
+        let score = rhythmEstimator.estimate(
+            activities: tasks,
+            checkIns: checkIns,
+            now: prompt.scoreDate
+        ).source.score
         Task { @MainActor [weak self] in
-            try? await self?.coordinator.saveCheckIn(rating: rating, rhythmScore: score, day: now)
+            guard let self else { return }
+            do {
+                try await coordinator.saveCheckIn(rating: rating, rhythmScore: score, day: prompt.day)
+                let saved = CodexDailyWorkCheckIn(day: prompt.day, rating: rating, rhythmScore: score)
+                if let index = checkIns.firstIndex(where: {
+                    Calendar.current.isDate($0.day, inSameDayAs: prompt.day)
+                }) {
+                    checkIns[index] = saved
+                } else {
+                    checkIns.append(saved)
+                }
+            } catch {
+                healthTracker.markStale(message: Self.userFacingErrorMessage(for: error))
+                health = healthTracker.state
+            }
         }
     }
 
-    func currentCheckIn(at now: Date) -> CodexDailyWorkRating? {
-        let day = Calendar.current.startOfDay(for: now)
+    func currentCheckIn(on day: Date) -> CodexDailyWorkRating? {
         return checkIns.first { Calendar.current.isDate($0.day, inSameDayAs: day) }?.rating
     }
 

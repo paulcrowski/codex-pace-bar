@@ -25,6 +25,13 @@ for key in allowedKeys {
         sanitized[key] = value
     }
 }
+if sanitized["cwd"] == nil {
+    let workingDirectory = FileManager.default.currentDirectoryPath
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !workingDirectory.isEmpty {
+        sanitized["cwd"] = workingDirectory
+    }
+}
 guard sanitized["session_id"] != nil,
       sanitized["turn_id"] != nil,
       sanitized["hook_event_name"] != nil

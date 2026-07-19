@@ -16,9 +16,32 @@ struct CodexHookInstallerTests {
 
         try installer.install(forwarderURL: forwarder)
         #expect(installer.isInstalled(forwarderURL: forwarder))
+        var status = installer.setupStatus(forwarderURL: forwarder)
+        #expect(status.isConfigured)
+        #expect(!status.isReceivingEvents)
+        #expect(status.observedHookNames.isEmpty)
+        #expect(status.displayState(for: "PermissionRequest") == .installed)
+        #expect(status.displayState(for: "UserPromptSubmit") == .installed)
+        #expect(status.displayState(for: "Stop") == .installed)
+        #expect(status.displayState(for: "Unknown") == .notInstalled)
         let installed = String(decoding: try Data(contentsOf: config), as: UTF8.self)
         #expect(installed.contains("existing-tool"))
         #expect(!installed.contains("prompt"))
+
+        try Data(
+            """
+            {"hook_event_name":"UserPromptSubmit"}
+            {"hook_event_name":"Stop"}
+
+            """.utf8
+        ).write(to: eventFile)
+        status = installer.setupStatus(forwarderURL: forwarder)
+        #expect(status.isReceivingEvents)
+        #expect(status.observedHookNames == ["UserPromptSubmit", "Stop"])
+        #expect(!status.hasObservedAllRequiredHooks)
+        #expect(status.displayState(for: "PermissionRequest") == .installed)
+        #expect(status.displayState(for: "UserPromptSubmit") == .working)
+        #expect(status.displayState(for: "Stop") == .working)
 
         try installer.uninstall()
         let uninstalled = String(decoding: try Data(contentsOf: config), as: UTF8.self)

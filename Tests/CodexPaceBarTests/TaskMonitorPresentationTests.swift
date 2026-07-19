@@ -4,6 +4,40 @@ import Testing
 
 struct TaskMonitorPresentationTests {
     @Test
+    func distinguishesLegacyRunningTurnFromQueuedPlaceholder() {
+        let now = Date(timeIntervalSince1970: 1_784_373_500)
+        let legacyRunning = CodexTaskActivity(
+            sessionID: "legacy",
+            turnID: "turn",
+            workingDirectory: "/work/project",
+            model: nil,
+            effort: nil,
+            status: .queued,
+            startedAt: now.addingTimeInterval(-60),
+            completedAt: nil,
+            duration: nil,
+            timeToFirstToken: nil
+        )
+        let placeholder = CodexTaskActivity(
+            sessionID: "placeholder",
+            turnID: "turn",
+            workingDirectory: "/work/project",
+            model: nil,
+            effort: nil,
+            status: .queued,
+            startedAt: nil,
+            completedAt: nil,
+            duration: nil,
+            timeToFirstToken: nil
+        )
+
+        #expect(legacyRunning.isRunning)
+        #expect(legacyRunning.visibleStatus == .working)
+        #expect(!placeholder.isRunning)
+        #expect(placeholder.visibleStatus == .queued)
+    }
+
+    @Test
     func showsNoActiveTasksWithoutInventingAnEta() {
         let now = Date(timeIntervalSince1970: 1_784_373_500)
         let presentation = CodexTaskSummaryPresenter().present(
@@ -116,6 +150,33 @@ struct TaskMonitorPresentationTests {
         )
 
         #expect(presentation.estimateText == "Learning · 3/10 samples")
+    }
+
+    @Test
+    func hidesInternalTurnIdentifierWhenProjectIsUnknown() {
+        let now = Date(timeIntervalSince1970: 1_784_373_500)
+        let task = CodexTaskActivity(
+            sessionID: "session",
+            turnID: "019f78ed-4da6-7fe0-b12a-8e92ebefd000",
+            workingDirectory: nil,
+            model: nil,
+            effort: nil,
+            status: .working,
+            startedAt: now.addingTimeInterval(-60),
+            completedAt: nil,
+            duration: nil,
+            timeToFirstToken: nil
+        )
+
+        let presentation = CodexTaskSummaryPresenter().present(
+            needsYou: [],
+            working: [task],
+            history: [],
+            now: now,
+            lastUpdatedAt: now
+        )
+
+        #expect(presentation.projectName == "Codex task")
     }
 
     @Test

@@ -46,7 +46,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController = SettingsWindowController(
             settings: settings,
             launchAtLogin: launchAtLogin,
-            onOpenTaskMonitor: { [weak self] in self?.showTaskMonitor() }
+            onOpenTaskMonitor: { [weak self] in self?.showTaskMonitor() },
+            onGetTaskHookStatus: { [weak self] in
+                self?.taskHookSetupStatus() ?? .notConfigured
+            },
+            onSendMobileNotificationTest: { [weak self] in
+                guard let self else { return false }
+                return await self.taskNotificationController.sendMobileTest(
+                    topic: self.settings.mobileNotificationTopic
+                )
+            }
         )
         statusBarController = StatusBarController(
             model: model,
@@ -138,6 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusBarController?.refreshIcon()
         case .taskNotifications:
             reconcileTaskMonitorRuntime()
+        case .mobileTaskNotifications:
+            taskNotificationController.resetMobileBaseline()
+            reconcileTaskMonitorRuntime()
+            taskMonitorViewModel?.reload()
         case .codexExecutable, .forecastMode, .paceThreshold:
             break
         }
@@ -179,16 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let model = ensureTaskMonitorModel() else {
             return
         }
-        taskMonitorStatusBarController = TaskMonitorStatusBarController(
-            model: model,
-            onTasksReloaded: { [weak self] tasks in
-                guard let self else { return }
-                self.taskNotificationController.notifyIfNeeded(
-                    for: tasks,
-                    enabled: self.settings.taskNotificationsEnabled
-                )
-            }
-        )
+        taskMonitorStatusBarController = TaskMonitorStatusBarController(model: model)
         taskMonitorStatusBarController?.show()
     }
 
@@ -225,6 +229,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 coordinator: monitor,
                 focusLoadEnabled: settings.focusLoadEnabled
             )
+            model.onTasksReloaded = { [weak self] tasks in
+                guard let self else { return }
+                self.taskNotificationController.notifyIfNeeded(
+                    for: tasks,
+                    localEnabled: self.settings.taskNotificationsEnabled,
+                    mobileEnabled: self.settings.mobileTaskNotificationsEnabled,
+                    mobileTopic: self.settings.mobileNotificationTopic,
+                    mobileDetailsEnabled: self.settings.mobileNotificationDetailsEnabled,
+                    silentGoalsAndSwarmsEnabled: self.settings.silentGoalsAndSwarmsEnabled
+                )
+            }
             taskMonitorViewModel = model
             statusBarController?.setTaskMonitorModel(
                 settings.mainTaskSummaryEnabled || uiProofMode ? model : nil
@@ -263,14 +278,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installTaskHooks() throws {
-        guard let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent() else {
-            return
-        }
-        let forwarderURL = executableDirectory.appendingPathComponent("CodexPaceBarHookForwarder")
+        guard let forwarderURL = taskHookForwarderURL() else { return }
         guard FileManager.default.isExecutableFile(atPath: forwarderURL.path) else {
             return
         }
         try hookInstaller.install(forwarderURL: forwarderURL)
+    }
+
+    private func taskHookSetupStatus() -> CodexHookSetupStatus {
+        guard let forwarderURL = taskHookForwarderURL() else { return .notConfigured }
+        return hookInstaller.setupStatus(forwarderURL: forwarderURL)
+    }
+
+    private func taskHookForwarderURL() -> URL? {
+        Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("CodexPaceBarHookForwarder")
     }
 
     private func startTaskMonitorAfterCoreRefreshIfNeeded() {
@@ -304,6 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopTaskMonitorRuntime() {
+        taskNotificationController.resetMobileBaseline()
         taskMonitorCoordinator?.stop()
         taskMonitorCoordinator = nil
         taskMonitorViewModel = nil

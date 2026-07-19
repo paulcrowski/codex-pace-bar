@@ -82,6 +82,8 @@ public final class RefreshCoordinator {
             break
         case .taskNotifications:
             break
+        case .mobileTaskNotifications:
+            break
         case .focusLoad:
             break
         case .refreshInterval:

@@ -28,6 +28,14 @@ struct TaskMonitorView: View {
                             WorkRhythmSummary(estimate: rhythm)
                         }
 
+                        if let prompt = model.checkInPrompt(at: context.date) {
+                            DailyCheckIn(
+                                period: prompt.period,
+                                selection: model.currentCheckIn(on: prompt.day),
+                                onSelect: { model.saveCheckIn($0, for: prompt) }
+                            )
+                        }
+
                         if !needsYou.isEmpty {
                             TaskSection(title: "Needs you", color: .orange) {
                                 ForEach(needsYou) { task in
@@ -82,14 +90,7 @@ struct TaskMonitorView: View {
                             }
                         }
 
-                        if Calendar.current.component(.hour, from: context.date) >= 18 {
-                            DailyCheckIn(
-                                selection: model.currentCheckIn(at: context.date),
-                                onSelect: { model.saveCheckIn($0, at: context.date) }
-                            )
-                        }
-
-                        Text("Approval statuses use local Codex Hooks. After enabling them for the first time, approve them with /hooks in Codex.")
+                        Text("Live approval status uses optional Codex Hooks. Task-finished alerts also work from local session logs.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
@@ -184,7 +185,9 @@ private struct WorkRhythmSummary: View {
             Image(systemName: estimate.level == .veryIntense ? "figure.walk" : "waveform.path.ecg")
                 .foregroundStyle(estimate.level == .veryIntense ? .orange : .blue)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Work rhythm: \(estimate.level.label)")
+                Text(estimate.isPersonallyCalibrated
+                    ? "Work rhythm: \(estimate.level.label)"
+                    : "Work rhythm: Learning")
                     .font(.system(size: 12, weight: .medium))
                 Text(estimate.detail)
                     .font(.system(size: 11))
@@ -208,13 +211,19 @@ private struct TodaySummary: View {
             HStack(spacing: 12) {
                 metric("Active time", summary.activeWallTime.durationText)
                 metric("Completed", "\(summary.completedTasks)")
-                metric("Waiting for you", summary.waitingForUser.durationText)
+                metric(
+                    "Approval / input wait",
+                    summary.waitingForUser > 0 ? summary.waitingForUser.durationText : "None"
+                )
             }
             if summary.agentHours > summary.activeWallTime {
                 Text("Parallel agent time \(summary.agentHours.durationText)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
+            Text("Wait counts only while Codex asks for approval or input; time after a task finishes is not counted.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
             Text("Local task activity. The main pace bar forecasts your Codex limit.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
@@ -233,12 +242,13 @@ private struct TodaySummary: View {
 }
 
 private struct DailyCheckIn: View {
+    let period: CodexDailyCheckInPeriod
     let selection: CodexDailyWorkRating?
     let onSelect: (CodexDailyWorkRating) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("How did work feel today?")
+            Text(period == .yesterday ? "How did work feel yesterday?" : "How did work feel today?")
                 .font(.system(size: 12, weight: .medium))
             HStack {
                 choice("Calm", .calm)
@@ -264,15 +274,16 @@ private struct TaskMonitorRow: View {
     let onNavigate: () -> Void
 
     var body: some View {
+        let visibleStatus = task.visibleStatus
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: task.status.symbol)
-                .foregroundStyle(task.status.color)
+            Image(systemName: visibleStatus.symbol)
+                .foregroundStyle(visibleStatus.color)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(task.projectName).font(.system(size: 13, weight: .medium)).lineLimit(1)
                     Spacer()
-                    Text(task.status.label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text(visibleStatus.label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 8) {
                     Text(task.durationText(at: now))
@@ -303,7 +314,7 @@ private extension CodexTaskDurationEstimate {
 
 private extension CodexTaskActivity {
     var projectName: String {
-        workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent } ?? turnID
+        projectDisplayName
     }
 
     func durationText(at now: Date) -> String {

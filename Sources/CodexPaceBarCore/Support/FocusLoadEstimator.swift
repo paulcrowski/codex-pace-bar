@@ -85,7 +85,7 @@ public struct CodexFocusLoadEstimator: Sendable {
                 projectKey: activity.workingDirectory ?? activity.sessionID,
                 start: max(startedAt, windowStart),
                 end: end,
-                isWorking: activity.status == .working && end == now
+                isWorking: activity.isRunning && end == now
             )
         }
         .sorted { $0.start < $1.start }
@@ -258,17 +258,23 @@ public struct CodexWorkRhythmEstimate: Equatable, Sendable {
     public let level: CodexWorkRhythmLevel
     public let detail: String
     public let isPersonallyCalibrated: Bool
+    public let calibrationDays: Int
+    public let calibrationTarget: Int
     public let source: CodexFocusLoadEstimate
 
     public init(
         level: CodexWorkRhythmLevel,
         detail: String,
         isPersonallyCalibrated: Bool,
+        calibrationDays: Int,
+        calibrationTarget: Int,
         source: CodexFocusLoadEstimate
     ) {
         self.level = level
         self.detail = detail
         self.isPersonallyCalibrated = isPersonallyCalibrated
+        self.calibrationDays = calibrationDays
+        self.calibrationTarget = calibrationTarget
         self.source = source
     }
 }
@@ -276,7 +282,7 @@ public struct CodexWorkRhythmEstimate: Equatable, Sendable {
 public struct CodexWorkRhythmEstimator: Sendable {
     public let minimumCalibrationDays: Int
 
-    public init(minimumCalibrationDays: Int = 20) {
+    public init(minimumCalibrationDays: Int = 7) {
         self.minimumCalibrationDays = max(1, minimumCalibrationDays)
     }
 
@@ -305,20 +311,31 @@ public struct CodexWorkRhythmEstimator: Sendable {
         case .high: .veryIntense
         }
         let detail: String
-        switch level {
-        case .calm:
-            detail = "Calm rhythm. This describes activity, not computer load."
-        case .intense:
-            detail = "Intense rhythm, without an alert."
-        case .veryIntense:
-            detail = source.maxConcurrentTasks > 1
-                ? "Several tasks are running in parallel. Consider a short break."
-                : "Long active session. Consider a short break."
+        if !calibrated {
+            let activityDescription = switch source.level {
+            case .low: "light"
+            case .moderate: "busy"
+            case .high: "very busy"
+            }
+            detail = "Rate 7 workdays so Pace Bar can learn what feels calm or intense for you. \(scored.count)/\(minimumCalibrationDays) done · \(activityDescription) activity now."
+        } else {
+            switch level {
+            case .calm:
+                detail = "Calm rhythm. This describes activity, not computer load."
+            case .intense:
+                detail = "Intense rhythm, without an alert."
+            case .veryIntense:
+                detail = source.maxConcurrentTasks > 1
+                    ? "Several tasks are running in parallel. Consider a short break."
+                    : "Long active session. Consider a short break."
+            }
         }
         return CodexWorkRhythmEstimate(
             level: level,
             detail: detail,
             isPersonallyCalibrated: calibrated,
+            calibrationDays: scored.count,
+            calibrationTarget: minimumCalibrationDays,
             source: source
         )
     }

@@ -110,6 +110,13 @@ public actor TaskActivityStore {
                 effort: effort,
                 workingDirectory: workingDirectory
             )
+            if var activity = activities[taskKey(for: turnID)] {
+                activity.model = model ?? activity.model
+                activity.effort = effort ?? activity.effort
+                activity.workingDirectory = workingDirectory ?? activity.workingDirectory
+                activities[activity.id] = activity
+                activityToPersist = activity
+            }
 
         case let .turnStarted(turnID, startedAt):
             currentTurnID = turnID

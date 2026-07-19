@@ -91,7 +91,7 @@ public struct CodexTaskSummaryPresenter: Sendable {
     }
 
     private func projectName(for task: CodexTaskActivity) -> String {
-        task.workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent } ?? task.turnID
+        task.projectDisplayName
     }
 
     private func elapsedText(for task: CodexTaskActivity, now: Date) -> String {

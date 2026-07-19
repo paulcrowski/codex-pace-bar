@@ -4,6 +4,29 @@ import Testing
 
 struct TaskDurationEstimatorTests {
     @Test
+    func doesNotEstimateAQueuedPlaceholderThatNeverStarted() {
+        let now = Date(timeIntervalSince1970: 1_784_400_000)
+        let placeholder = CodexTaskActivity(
+            sessionID: "session",
+            turnID: "turn",
+            workingDirectory: "/work/project",
+            model: nil,
+            effort: nil,
+            status: .queued,
+            startedAt: nil,
+            completedAt: nil,
+            duration: nil,
+            timeToFirstToken: nil
+        )
+
+        #expect(CodexTaskDurationEstimator().estimate(
+            for: placeholder,
+            now: now,
+            history: []
+        ) == nil)
+    }
+
+    @Test
     func fallsBackFromExactMatchToProjectHistoryAndBuildsTypicalDistribution() throws {
         let now = Date(timeIntervalSince1970: 1_784_400_000)
         let current = activity(sessionID: "current", turnID: "current", startedAt: now.addingTimeInterval(-60), duration: nil, model: "new-model")
