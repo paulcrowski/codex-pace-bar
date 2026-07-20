@@ -64,6 +64,37 @@ struct UsageHistorySeriesTests {
     }
 
     @Test
+    func usageCorrectionDoesNotHideEarlierCurrentWindowSamples() {
+        let now = date(4_000)
+        let resetAt = date(10_000)
+        let samples = [
+            sample(at: date(1_000), used: 50, resetAt: resetAt),
+            sample(at: date(2_000), used: 53, resetAt: resetAt),
+            sample(at: date(3_000), used: 49, resetAt: resetAt),
+            sample(at: now, used: 50, resetAt: resetAt)
+        ]
+
+        #expect(UsageHistorySeries.current(from: samples, now: now) == samples)
+    }
+
+    @Test
+    func usageDropWithAdvancedResetMetadataStartsNewSeriesBeforeDeadline() {
+        let now = date(4_000)
+        let oldResetAt = date(100_000)
+        let latest = sample(
+            at: now,
+            used: 4,
+            resetAt: oldResetAt.addingTimeInterval(2 * 24 * 60 * 60)
+        )
+        let samples = [
+            sample(at: date(3_000), used: 65, resetAt: oldResetAt),
+            latest
+        ]
+
+        #expect(UsageHistorySeries.current(from: samples, now: now) == [latest])
+    }
+
+    @Test
     func largeResetCorrectionBeforeDeadlineRemainsContinuous() {
         let now = date(3_000)
         let oldReset = date(10_000)
@@ -101,7 +132,7 @@ struct UsageHistorySeriesTests {
     }
 
     @Test
-    func lowerUsageStartsNewSeriesWithoutResetMetadataChange() {
+    func usageDecreaseWithStableResetMetadataRemainsContinuous() {
         let now = date(3_000)
         let resetAt = date(10_000)
         let latest = sample(at: now, used: 5, resetAt: resetAt)
@@ -110,12 +141,12 @@ struct UsageHistorySeriesTests {
             latest
         ]
 
-        #expect(UsageHistorySeries.current(from: samples, now: now) == [latest])
+        #expect(UsageHistorySeries.current(from: samples, now: now) == samples)
         #expect(samples.count == 2)
     }
 
     @Test
-    func tinyUsageDecreaseStartsNewSeries() {
+    func tinyUsageCorrectionRemainsContinuous() {
         let now = date(2_000)
         let resetAt = date(10_000)
         let latest = sample(at: now, used: 19.9, resetAt: resetAt)
@@ -123,11 +154,11 @@ struct UsageHistorySeriesTests {
         #expect(UsageHistorySeries.current(
             from: [sample(at: date(1_000), used: 20, resetAt: resetAt), latest],
             now: now
-        ) == [latest])
+        ) == [sample(at: date(1_000), used: 20, resetAt: resetAt), latest])
     }
 
     @Test
-    func manuallyTriggeredUsageResetBeforeAdvertisedDeadlineStartsNewSeries() {
+    func usageDropBeforeAdvertisedDeadlineRemainsContinuousWithoutResetMetadata() {
         let now = date(2_000)
         let resetAt = date(100_000)
         let latest = sample(at: now, used: 2, resetAt: resetAt)
@@ -135,7 +166,7 @@ struct UsageHistorySeriesTests {
         #expect(UsageHistorySeries.current(
             from: [sample(at: date(1_000), used: 70, resetAt: resetAt), latest],
             now: now
-        ) == [latest])
+        ) == [sample(at: date(1_000), used: 70, resetAt: resetAt), latest])
     }
 
     @Test
@@ -198,7 +229,7 @@ struct UsageHistorySeriesTests {
         let second = sample(at: date(2_000), used: 3, resetAt: resetAt)
         let third = sample(at: now, used: 4, resetAt: resetAt)
 
-        #expect(UsageHistorySeries.current(from: [third, first, second], now: now) == [second, third])
+        #expect(UsageHistorySeries.current(from: [third, first, second], now: now) == [first, second, third])
     }
 
     @Test
