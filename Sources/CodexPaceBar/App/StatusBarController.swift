@@ -86,6 +86,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     func show() {
         guard let button = statusItem.button, !popover.isShown else { return }
         NSApp.activate(ignoringOtherApps: true)
+        taskMonitorModel?.reload()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         startOutsideClickMonitor()
     }
