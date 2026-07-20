@@ -25,12 +25,13 @@ public enum UsageHistorySeries {
     }
 
     static func startsNewSeries(previous: UsageSample, sample: UsageSample) -> Bool {
-        if sample.usedPercent < previous.usedPercent {
-            return true
-        }
-
         let resetAdvance = sample.resetAt.timeIntervalSince(previous.resetAt)
-        return sample.timestamp >= previous.resetAt
-            && resetAdvance >= minimumScheduledResetAdvance
+        let hasAdvancedReset = resetAdvance >= minimumScheduledResetAdvance
+
+        // A usage correction can move backwards without changing the window.
+        // Before the advertised deadline, require both a drop and an advanced
+        // reset timestamp; after the deadline the metadata alone is enough.
+        return hasAdvancedReset
+            && (sample.usedPercent < previous.usedPercent || sample.timestamp >= previous.resetAt)
     }
 }
