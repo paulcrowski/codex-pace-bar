@@ -287,16 +287,6 @@ struct PopoverView: View {
                     .interpolationMethod(.linear)
                 }
 
-                ForEach(idealChartPoints) { point in
-                    LineMark(
-                        x: .value("Time", point.date),
-                        y: .value("Ideal", point.value),
-                        series: .value("Series", "Ideal")
-                    )
-                    .foregroundStyle(by: .value("Series", "Ideal"))
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                }
-
                 ForEach(forecastChartPoints) { point in
                     LineMark(
                         x: .value("Time", point.date),
@@ -318,7 +308,6 @@ struct PopoverView: View {
             }
             .chartForegroundStyleScale([
                 "Actual": Color.blue,
-                "Ideal": Color.gray,
                 "Forecast": Color.orange
             ])
             .chartLegend(.hidden)
@@ -339,7 +328,6 @@ struct PopoverView: View {
 
             HStack(spacing: 14) {
                 ChartLegendItem(label: "Actual", color: .blue)
-                ChartLegendItem(label: "Ideal pace", color: .gray)
                 ChartLegendItem(
                     label: model.forecast == nil ? "Forecast pending" : "Forecast",
                     color: model.forecast == nil ? .orange.opacity(0.4) : .orange
@@ -348,18 +336,6 @@ struct PopoverView: View {
         }
         .padding(12)
         .background(panelBackground)
-    }
-
-    private var idealChartPoints: [UsageChartPoint] {
-        guard let window = model.selectedWindow else {
-            return []
-        }
-
-        let start = window.resetsAt.addingTimeInterval(-window.windowDurationMins * 60)
-        return [
-            UsageChartPoint(id: "ideal-start", date: start, value: 0),
-            UsageChartPoint(id: "ideal-end", date: window.resetsAt, value: 100)
-        ]
     }
 
     private var forecastChartPoints: [UsageChartPoint] {
