@@ -10,6 +10,7 @@ public final class MobileTaskNotificationService {
     public static let requestTimeout: TimeInterval = 10
     public static let maximumSendAttempts = 3
     public static let retryBaseDelay: TimeInterval = 0.05
+    public static let aggregateFreshnessWindow: TimeInterval = 2 * 60 * 60
     public static let ntfyBaseURL = URL(string: "https://ntfy.sh")!
 
     private static let deliveredKeysDefaultsKey = "mobileTaskNotificationDeliveredKeys"
@@ -23,6 +24,8 @@ public final class MobileTaskNotificationService {
     private var inFlightKeys = Set<String>()
     private var pendingCompletionTasks: [String: CodexTaskActivity] = [:]
     private var latestQuietTasks: [CodexTaskActivity] = []
+    private var latestQuietGoals: [CodexGoalActivity] = []
+    private var latestQuietSwarms: [CodexSwarmActivity] = []
     private var quietPublishURL: URL?
     private var quietIncludeDetails = false
     private var quietFlushTask: Task<Void, Never>?
@@ -42,12 +45,18 @@ public final class MobileTaskNotificationService {
         self.deliveredOrder = storedKeys
     }
 
-    public func prime(with tasks: [CodexTaskActivity]) {
+    public func prime(
+        with tasks: [CodexTaskActivity],
+        goals: [CodexGoalActivity] = [],
+        swarms: [CodexSwarmActivity] = []
+    ) {
         let keys = tasks
             .filter { message(for: $0) != nil }
             .sorted { eventDate(for: $0) < eventDate(for: $1) }
             .map(eventKey(for:))
-        recordDelivered(keys)
+        let aggregateKeys = goals.filter(\.isTerminal).map(goalEventKey)
+            + swarms.filter { $0.completedAt != nil }.map(swarmEventKey)
+        recordDelivered(keys + aggregateKeys)
     }
 
     public func notifyIfNeeded(
@@ -56,6 +65,8 @@ public final class MobileTaskNotificationService {
         topic: String,
         includeDetails: Bool = false,
         silentGoalsAndSwarmsEnabled: Bool = false,
+        goals: [CodexGoalActivity] = [],
+        swarms: [CodexSwarmActivity] = [],
         now: Date = Date()
     ) async {
         guard enabled, let publishURL = Self.publishURL(topic: topic) else {
@@ -70,12 +81,21 @@ public final class MobileTaskNotificationService {
                 includeDetails: includeDetails,
                 now: now
             )
-            queueFreshCompletions(from: tasks, now: now)
+            await deliverNativeTerminalAlerts(
+                goals: goals,
+                swarms: swarms,
+                now: now,
+                to: publishURL,
+                includeDetails: includeDetails
+            )
+            queueFreshCompletions(from: tasks, goals: goals, swarms: swarms, now: now)
             latestQuietTasks = tasks
+            latestQuietGoals = goals
+            latestQuietSwarms = swarms
             quietPublishURL = publishURL
             quietIncludeDetails = includeDetails
 
-            if hasActiveTasks(tasks, now: now) {
+            if hasBlockingActivity(tasks: tasks, goals: goals, swarms: swarms, now: now) {
                 quietFlushTask?.cancel()
                 quietFlushTask = nil
             } else {
@@ -98,6 +118,8 @@ public final class MobileTaskNotificationService {
         quietFlushTask = nil
         pendingCompletionTasks.removeAll()
         latestQuietTasks.removeAll()
+        latestQuietGoals.removeAll()
+        latestQuietSwarms.removeAll()
         quietPublishURL = nil
     }
 
@@ -126,11 +148,19 @@ public final class MobileTaskNotificationService {
     }
 
     private func deliver(_ message: Message, for task: CodexTaskActivity, to url: URL, now: Date) async {
-        let date = eventDate(for: task)
+        await deliver(message, key: eventKey(for: task), occurredAt: eventDate(for: task), to: url, now: now)
+    }
+
+    private func deliver(
+        _ message: Message,
+        key: String,
+        occurredAt date: Date,
+        to url: URL,
+        now: Date
+    ) async {
         let age = now.timeIntervalSince(date)
         guard age >= -30, age <= Self.maximumEventAge else { return }
 
-        let key = eventKey(for: task)
         guard !deliveredKeys.contains(key), !inFlightKeys.contains(key) else { return }
         inFlightKeys.insert(key)
         let delivered = await send(message, to: url)
@@ -140,12 +170,18 @@ public final class MobileTaskNotificationService {
         }
     }
 
-    private func queueFreshCompletions(from tasks: [CodexTaskActivity], now: Date) {
+    private func queueFreshCompletions(
+        from tasks: [CodexTaskActivity],
+        goals: [CodexGoalActivity],
+        swarms: [CodexSwarmActivity],
+        now: Date
+    ) {
         for task in tasks where task.status == .completed {
             let age = now.timeIntervalSince(eventDate(for: task))
             guard age >= -30, age <= Self.maximumEventAge else { continue }
             let key = eventKey(for: task)
             guard !deliveredKeys.contains(key), !inFlightKeys.contains(key) else { continue }
+            guard !belongsToAggregate(task, goals: goals, swarms: swarms) else { continue }
             pendingCompletionTasks[key] = task
         }
     }
@@ -155,6 +191,62 @@ public final class MobileTaskNotificationService {
             guard task.isRunning || task.status.isWaitingForUser else { return false }
             let age = now.timeIntervalSince(eventDate(for: task))
             return age >= -30 && age <= 2 * 60 * 60
+        }
+    }
+
+    private func hasBlockingActivity(
+        tasks: [CodexTaskActivity],
+        goals: [CodexGoalActivity],
+        swarms: [CodexSwarmActivity],
+        now: Date
+    ) -> Bool {
+        hasActiveTasks(tasks, now: now)
+            || goals.contains(where: {
+                $0.isActive
+                    && now >= $0.updatedAt
+                    && now.timeIntervalSince($0.updatedAt) <= Self.aggregateFreshnessWindow
+            })
+            || swarms.contains(where: {
+                $0.isActive
+                    && now >= $0.firstSpawnedAt
+                    && now.timeIntervalSince($0.firstSpawnedAt) <= Self.aggregateFreshnessWindow
+            })
+    }
+
+    private func belongsToAggregate(
+        _ task: CodexTaskActivity,
+        goals: [CodexGoalActivity],
+        swarms: [CodexSwarmActivity]
+    ) -> Bool {
+        goals.contains { $0.threadID == task.sessionID }
+            || swarms.contains { $0.sessionID == task.sessionID }
+    }
+
+    private func deliverNativeTerminalAlerts(
+        goals: [CodexGoalActivity],
+        swarms: [CodexSwarmActivity],
+        now: Date,
+        to url: URL,
+        includeDetails: Bool
+    ) async {
+        for goal in goals where goal.isTerminal {
+            await deliver(
+                goalMessage(for: goal, includeDetails: includeDetails),
+                key: goalEventKey(goal),
+                occurredAt: goal.updatedAt,
+                to: url,
+                now: now
+            )
+        }
+        for swarm in swarms where swarm.completedAt != nil
+            && !goals.contains(where: { $0.threadID == swarm.sessionID && $0.isTerminal }) {
+            await deliver(
+                swarmMessage(for: swarm, includeDetails: includeDetails),
+                key: swarmEventKey(swarm),
+                occurredAt: swarm.completedAt ?? swarm.firstSpawnedAt,
+                to: url,
+                now: now
+            )
         }
     }
 
@@ -180,7 +272,12 @@ public final class MobileTaskNotificationService {
     private func flushQuietBatch() async {
         quietFlushTask = nil
         guard let publishURL = quietPublishURL,
-              !hasActiveTasks(latestQuietTasks, now: Date()) else {
+              !hasBlockingActivity(
+                tasks: latestQuietTasks,
+                goals: latestQuietGoals,
+                swarms: latestQuietSwarms,
+                now: Date()
+              ) else {
             return
         }
 
@@ -332,6 +429,39 @@ public final class MobileTaskNotificationService {
         }
     }
 
+    private func goalMessage(for goal: CodexGoalActivity, includeDetails: Bool) -> Message {
+        let project = projectName(for: goal.workingDirectory)
+        let title = goal.status == .complete ? "Codex goal finished" : "Codex goal needs you"
+        let body: String
+        if includeDetails, let project {
+            body = goal.status == .complete
+                ? "Goal in \(project) completed."
+                : "A goal in \(project) is blocked and needs attention."
+        } else {
+            body = goal.status == .complete
+                ? "A Codex goal finished on your Mac."
+                : "A Codex goal is blocked on your Mac."
+        }
+        return Message(title: title, body: body, priority: "high", tags: goal.status == .complete ? "white_check_mark" : "warning")
+    }
+
+    private func swarmMessage(for swarm: CodexSwarmActivity, includeDetails: Bool) -> Message {
+        let project = projectName(for: swarm.workingDirectory)
+        let body: String
+        if includeDetails, let project {
+            body = "Swarm in \(project) completed with \(swarm.agentCount) agent\(swarm.agentCount == 1 ? "" : "s")."
+        } else {
+            body = "A Codex swarm finished on your Mac."
+        }
+        return Message(title: "Codex swarm finished", body: body, priority: "high", tags: "white_check_mark")
+    }
+
+    private func projectName(for path: String?) -> String? {
+        guard let path else { return nil }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? nil : String(name.prefix(60))
+    }
+
     private func waitingDetails(for task: CodexTaskActivity) -> String {
         guard let project = projectName(for: task) else {
             return "A Codex task is waiting for approval or input on your Mac."
@@ -395,6 +525,14 @@ public final class MobileTaskNotificationService {
     private func eventKey(for task: CodexTaskActivity) -> String {
         let timestamp = eventDate(for: task).timeIntervalSince1970
         return "\(task.id):\(task.status.rawValue):\(timestamp)"
+    }
+
+    private func goalEventKey(_ goal: CodexGoalActivity) -> String {
+        "goal:\(goal.id):\(goal.status.rawValue):\(goal.updatedAt.timeIntervalSince1970)"
+    }
+
+    private func swarmEventKey(_ swarm: CodexSwarmActivity) -> String {
+        "swarm:\(swarm.id):complete:\(swarm.completedAt?.timeIntervalSince1970 ?? 0)"
     }
 
     private func recordDelivered(_ keys: [String]) {

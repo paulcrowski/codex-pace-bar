@@ -144,6 +144,7 @@ public enum CodexTaskCompletionForecastPresenter {
         let minutes = max(0, Int((forecast.horizon / 60).rounded()))
         let probability = min(max(forecast.probability, 0), 1)
         let percentage = Int((probability * 100).rounded())
-        return "\(minutes) min completion chance: \(percentage)%"
+        let riskPercentage = 100 - percentage
+        return "\(minutes) min safety check: \(percentage)% finished · \(riskPercentage)% may run longer"
     }
 }

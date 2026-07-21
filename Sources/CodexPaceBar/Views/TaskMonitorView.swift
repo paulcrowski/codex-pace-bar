@@ -10,6 +10,8 @@ struct TaskMonitorView: View {
             let needsYou = model.needsYou(at: context.date)
             let working = model.working(at: context.date)
             let finished = model.recentlyFinished(at: context.date)
+            let activeGoal = model.activeGoal(at: context.date)
+            let activeSwarm = activeGoal == nil ? model.activeSwarm(at: context.date) : nil
             VStack(alignment: .leading, spacing: 0) {
                 header(
                     needsYou: needsYou.count,
@@ -52,8 +54,31 @@ struct TaskMonitorView: View {
                             }
                         }
 
+                        if let activeGoal {
+                            TaskSection(title: "Goal", color: .blue) {
+                                GoalMonitorRow(
+                                    goal: activeGoal,
+                                    estimate: model.goalEstimate(for: activeGoal, now: context.date),
+                                    completionForecast: model.goalCompletionForecast(
+                                        for: activeGoal,
+                                        within: 30 * 60,
+                                        now: context.date
+                                    ),
+                                    now: context.date
+                                )
+                            }
+                        } else if let activeSwarm {
+                            TaskSection(title: "Swarm", color: .purple) {
+                                SwarmMonitorRow(
+                                    swarm: activeSwarm,
+                                    estimate: model.swarmEstimate(for: activeSwarm, now: context.date),
+                                    now: context.date
+                                )
+                            }
+                        }
+
                         if !working.isEmpty {
-                            TaskSection(title: "Working", color: .blue) {
+                            TaskSection(title: activeGoal == nil && activeSwarm == nil ? "Working" : "Current turn", color: .blue) {
                                 ForEach(working) { task in
                                     TaskMonitorRow(
                                         task: task,
@@ -301,48 +326,217 @@ private struct TaskMonitorRow: View {
     let now: Date
     let canNavigate: Bool
     let onNavigate: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         let visibleStatus = task.visibleStatus
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: visibleStatus.symbol)
                 .foregroundStyle(visibleStatus.color)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(task.projectName).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(task.projectName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
                     Spacer()
-                    Text(visibleStatus.label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 8) {
-                    Text(task.durationText(at: now))
-                    if let estimate { Text(estimate.etaText) }
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                if let completionForecast {
-                    Text(CodexTaskCompletionForecastPresenter.text(completionForecast))
+                    Text(visibleStatus.label)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .top, spacing: 14) {
+                    TaskMonitorMetric(label: "Elapsed", value: task.durationText(at: now))
+                    if let estimate {
+                        Rectangle()
+                            .fill(.quaternary)
+                            .frame(width: 1, height: 28)
+                        TaskMonitorEstimateMetric(estimate: estimate)
+                    }
+                }
+
+                if let completionForecast {
+                    Label(
+                        CodexTaskCompletionForecastPresenter.text(completionForecast),
+                        systemImage: "clock.badge.checkmark"
+                    )
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
             }
             if canNavigate {
-                Button(action: onNavigate) { Image(systemName: "arrow.up.forward.app") }
+                Button(action: onNavigate) {
+                    Image(systemName: "arrow.up.forward.app")
+                        .frame(width: 20, height: 20)
+                }
                     .buttonStyle(.borderless)
                     .help("Open the app for this task")
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isHovered ? Color.white.opacity(0.10) : Color.white.opacity(0.06))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: isHovered)
     }
 }
 
-private extension CodexTaskDurationEstimate {
-    var etaText: String {
-        guard let medianRemaining, let safeRemaining else {
-            return "Not enough history (\(sampleCount) similar)"
+private struct TaskMonitorMetric: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
         }
-        return "Usually \(medianRemaining.durationText)–\(safeRemaining.durationText) · based on \(sampleCount) similar"
+    }
+}
+
+private struct TaskMonitorEstimateMetric: View {
+    let estimate: CodexTaskDurationEstimate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let median = estimate.medianRemaining,
+               let safe = estimate.safeRemaining {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Typical finish")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(median.durationText)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.primary)
+                }
+                Text("Plan up to \(safe.durationText) · \(estimate.sampleCount) similar")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Learning estimate")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("\(estimate.sampleCount) similar tasks so far")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct GoalMonitorRow: View {
+    let goal: CodexGoalActivity
+    let estimate: CodexTaskDurationEstimate?
+    let completionForecast: CodexTaskCompletionForecast?
+    let now: Date
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "target")
+                .foregroundStyle(.blue)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(goal.projectName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("Active goal")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Text("Active \(goal.activeDuration.durationText) · wall \(goal.wallDuration.durationText)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                if let estimate,
+                   let median = estimate.medianRemaining,
+                   let safe = estimate.safeRemaining {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("Check back in")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(median.durationText)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                    }
+                    Text("Plan up to \(safe.durationText) · \(estimate.sampleCount) similar goals")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Goal ETA learning")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Not enough completed goals for a reliable range")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                if let completionForecast {
+                    Text("Goal · \(CodexTaskCompletionForecastPresenter.text(completionForecast))")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color.blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct SwarmMonitorRow: View {
+    let swarm: CodexSwarmActivity
+    let estimate: CodexTaskDurationEstimate?
+    let now: Date
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "person.3.fill")
+                .foregroundStyle(.purple)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(swarm.projectName)
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Text("\(swarm.agentCount) agents")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Text("Swarm active \(max(0, now.timeIntervalSince(swarm.firstSpawnedAt)).durationText)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                if let estimate,
+                   let median = estimate.medianRemaining,
+                   let safe = estimate.safeRemaining {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("Check back in")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(median.durationText)
+                            .font(.system(size: 16, weight: .bold))
+                    }
+                    Text("Plan up to \(safe.durationText) · \(estimate.sampleCount) similar swarms")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Swarm ETA learning")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Not enough completed swarms for a reliable range")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -357,6 +551,22 @@ private extension CodexTaskActivity {
             return "waiting \(max(0, now.timeIntervalSince(waitingStartedAt)).durationText)"
         }
         return seconds.durationText
+    }
+}
+
+private extension CodexGoalActivity {
+    var projectName: String {
+        guard let workingDirectory else { return "Codex goal" }
+        let name = URL(fileURLWithPath: workingDirectory).lastPathComponent
+        return name.isEmpty ? "Codex goal" : name
+    }
+}
+
+private extension CodexSwarmActivity {
+    var projectName: String {
+        guard let workingDirectory else { return "Codex swarm" }
+        let name = URL(fileURLWithPath: workingDirectory).lastPathComponent
+        return name.isEmpty ? "Codex swarm" : name
     }
 }
 

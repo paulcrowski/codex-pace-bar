@@ -7,14 +7,14 @@ struct TaskMonitorPresentationTests {
     func formatsThirtyMinuteCompletionChanceWithoutFalsePrecision() {
         let forecast = CodexTaskCompletionForecast(
             horizon: 30 * 60,
-            probability: 13.0 / 14.0,
+            probability: 0.96,
             sampleCount: 12,
             scope: .exact
         )
 
         #expect(
             CodexTaskCompletionForecastPresenter.text(forecast)
-                == "30 min completion chance: 93%"
+                == "30 min safety check: 96% finished · 4% may run longer"
         )
     }
 

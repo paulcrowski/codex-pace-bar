@@ -270,6 +270,47 @@ struct MobileTaskNotificationTests {
     }
 
     @Test
+    func nativeGoalStaysSilentAcrossTurnsAndSendsOneGoalAlert() async throws {
+        let defaults = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+        var requests: [URLRequest] = []
+        let service = MobileTaskNotificationService(
+            defaults: defaults,
+            quietInterval: 0.02
+        ) { request in
+            requests.append(request)
+            return try successResponse(for: request)
+        }
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let activeGoal = goal(status: .active, updatedAt: now)
+        service.prime(with: [])
+
+        await service.notifyIfNeeded(
+            for: [task(id: "turn", status: .completed, eventAt: now)],
+            enabled: true,
+            topic: "private-topic",
+            silentGoalsAndSwarmsEnabled: true,
+            goals: [activeGoal],
+            now: now
+        )
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(requests.isEmpty)
+
+        let completedGoal = goal(status: .complete, updatedAt: now.addingTimeInterval(1))
+        await service.notifyIfNeeded(
+            for: [task(id: "turn", status: .completed, eventAt: now.addingTimeInterval(1))],
+            enabled: true,
+            topic: "private-topic",
+            silentGoalsAndSwarmsEnabled: true,
+            goals: [completedGoal],
+            now: now.addingTimeInterval(1)
+        )
+
+        #expect(requests.count == 1)
+        #expect(requests.first?.value(forHTTPHeaderField: "Title") == "Codex goal finished")
+    }
+
+    @Test
     func failedSilentBatchStaysPendingAndRetries() async throws {
         let defaults = makeDefaults()
         defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
@@ -295,7 +336,7 @@ struct MobileTaskNotificationTests {
             now: now
         )
 
-        try await Task.sleep(for: .milliseconds(80))
+        try await Task.sleep(for: .milliseconds(300))
         #expect(requestCount == 2)
     }
 
@@ -318,6 +359,17 @@ struct MobileTaskNotificationTests {
             duration: status == .completed ? 60 : nil,
             timeToFirstToken: nil,
             lastEventAt: eventAt
+        )
+    }
+
+    private func goal(status: CodexGoalStatus, updatedAt: Date) -> CodexGoalActivity {
+        CodexGoalActivity(
+            threadID: "session-turn",
+            createdAt: updatedAt.addingTimeInterval(-60),
+            updatedAt: updatedAt,
+            status: status,
+            activeDuration: 60,
+            workingDirectory: "/private/project-name-must-not-leak"
         )
     }
 

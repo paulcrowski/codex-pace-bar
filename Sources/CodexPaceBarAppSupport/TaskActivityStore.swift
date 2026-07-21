@@ -4,6 +4,7 @@ import SQLite3
 
 public actor TaskActivityStore {
     public static let retentionDuration: TimeInterval = 30 * 24 * 60 * 60
+    public static let goalRetentionDuration: TimeInterval = 45 * 24 * 60 * 60
     public static let checkInRetentionDuration: TimeInterval = 90 * 24 * 60 * 60
 
     private static let schema = """
@@ -40,6 +41,39 @@ public actor TaskActivityStore {
         rating TEXT NOT NULL,
         rhythm_score INTEGER
     );
+    CREATE TABLE IF NOT EXISTS goal_activity (
+        goal_id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        status TEXT NOT NULL,
+        active_duration REAL NOT NULL,
+        working_directory TEXT
+    );
+    CREATE TABLE IF NOT EXISTS swarm_activity (
+        parent_task_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        first_spawned_at REAL NOT NULL,
+        agent_count INTEGER NOT NULL,
+        completed_at REAL,
+        working_directory TEXT
+    );
+    CREATE TABLE IF NOT EXISTS forecast_observation (
+        observation_id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        observed_at REAL NOT NULL,
+        elapsed_duration REAL NOT NULL,
+        median_remaining REAL,
+        safe_remaining REAL,
+        probability REAL,
+        horizon REAL,
+        sample_count INTEGER NOT NULL,
+        scope TEXT NOT NULL,
+        actual_duration REAL,
+        actual_status TEXT
+    );
     """
 
     private let database: SQLiteConnection
@@ -48,6 +82,8 @@ public actor TaskActivityStore {
     private var contexts: [String: TurnContext] = [:]
     private var currentTurnID: String?
     private var activities: [String: CodexTaskActivity]
+    private var goalsByID: [String: CodexGoalActivity]
+    private var swarmsByID: [String: CodexSwarmActivity]
 
     public init(
         databaseURL: URL,
@@ -93,8 +129,12 @@ public actor TaskActivityStore {
                 let result = Self.deduplicated(loaded)
                 try Self.migrateStatusEvents(result.statusEventMigrations, in: database)
                 self.activities = result.activities
+                self.goalsByID = try Self.loadGoals(from: database)
+                self.swarmsByID = try Self.loadSwarms(from: database)
             } else {
                 self.activities = [:]
+                self.goalsByID = [:]
+                self.swarmsByID = [:]
             }
             self.sessionID = initialSessionID
         } catch {
@@ -105,6 +145,8 @@ public actor TaskActivityStore {
 
     public func apply(_ event: CodexSessionLogEvent) throws {
         var activityToPersist: CodexTaskActivity?
+        var goalToPersist: CodexGoalActivity?
+        var swarmToPersist: CodexSwarmActivity?
 
         switch event {
         case let .sessionDiscovered(sessionID, workingDirectory):
@@ -205,10 +247,74 @@ public actor TaskActivityStore {
                 CodexTaskStatusEvent(sessionID: activity.sessionID, turnID: turnID, status: .completed, occurredAt: completedAt),
                 in: database.pointer
             )
+
+            if var swarm = swarmsByID[activity.id], swarm.completedAt == nil {
+                swarm.completedAt = completedAt
+                swarmsByID[swarm.id] = swarm
+                swarmToPersist = swarm
+            }
+
+        case let .goalUpdated(goal):
+            var merged = goalsByID[goal.id] ?? goal
+            guard goal.updatedAt >= merged.updatedAt else { break }
+            merged.updatedAt = goal.updatedAt
+            merged.status = goal.status
+            merged.activeDuration = max(merged.activeDuration, goal.activeDuration)
+            merged.workingDirectory = goal.workingDirectory ?? sessionWorkingDirectory
+            goalsByID[merged.id] = merged
+            goalToPersist = merged
+
+        case let .swarmAgentSpawned(occurredAt):
+            guard let turnID = currentTurnID else { break }
+            let parentTaskID = taskKey(for: turnID)
+            if let existing = swarmsByID[parentTaskID],
+               let completedAt = existing.completedAt,
+               occurredAt <= completedAt {
+                break
+            }
+            var swarm = swarmsByID[parentTaskID] ?? CodexSwarmActivity(
+                parentTaskID: parentTaskID,
+                sessionID: sessionID,
+                turnID: turnID,
+                firstSpawnedAt: occurredAt,
+                agentCount: 1,
+                workingDirectory: contexts[turnID]?.workingDirectory ?? sessionWorkingDirectory
+            )
+            swarm.firstSpawnedAt = min(swarm.firstSpawnedAt, occurredAt)
+            if swarmsByID[parentTaskID] != nil {
+                swarm.agentCount += 1
+            }
+            swarm.completedAt = nil
+            swarmsByID[parentTaskID] = swarm
+            swarmToPersist = swarm
         }
 
         if let activity = activityToPersist {
             try Self.upsert(activity, in: database.pointer)
+        }
+        if let goal = goalToPersist {
+            try Self.upsert(goal, in: database.pointer)
+            if goal.isTerminal {
+                try Self.markForecasts(
+                    entityType: .goal,
+                    entityID: goal.id,
+                    actualDuration: goal.activeDuration,
+                    actualStatus: goal.status.rawValue,
+                    in: database.pointer
+                )
+            }
+        }
+        if let swarm = swarmToPersist {
+            try Self.upsert(swarm, in: database.pointer)
+            if let duration = swarm.duration {
+                try Self.markForecasts(
+                    entityType: .swarm,
+                    entityID: swarm.id,
+                    actualDuration: duration,
+                    actualStatus: "complete",
+                    in: database.pointer
+                )
+            }
         }
     }
 
@@ -223,6 +329,52 @@ public actor TaskActivityStore {
 
     public func statusEvents(since date: Date) throws -> [CodexTaskStatusEvent] {
         try Self.loadStatusEvents(since: date, from: database.pointer)
+    }
+
+    public func goals() throws -> [CodexGoalActivity] {
+        goalsByID = try Self.loadGoals(from: database.pointer)
+        return goalsByID.values.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    public func swarms() throws -> [CodexSwarmActivity] {
+        swarmsByID = try Self.loadSwarms(from: database.pointer)
+        return swarmsByID.values.sorted { $0.firstSpawnedAt > $1.firstSpawnedAt }
+    }
+
+    public func recordForecast(_ observation: CodexForecastObservation) throws {
+        let statement = try Self.prepare(
+            """
+            INSERT INTO forecast_observation (observation_id, entity_type, entity_id, observed_at, elapsed_duration, median_remaining, safe_remaining, probability, horizon, sample_count, scope)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(observation_id) DO UPDATE SET
+                median_remaining = excluded.median_remaining,
+                safe_remaining = excluded.safe_remaining,
+                probability = excluded.probability,
+                horizon = excluded.horizon,
+                sample_count = excluded.sample_count,
+                scope = excluded.scope;
+            """,
+            on: database.pointer
+        )
+        defer { sqlite3_finalize(statement) }
+        try Self.bind(observation.id, to: statement, index: 1)
+        try Self.bind(observation.entityType.rawValue, to: statement, index: 2)
+        try Self.bind(observation.entityID, to: statement, index: 3)
+        try Self.bind(observation.observedAt.timeIntervalSince1970, to: statement, index: 4)
+        try Self.bind(observation.elapsedDuration, to: statement, index: 5)
+        try Self.bind(observation.medianRemaining, to: statement, index: 6)
+        try Self.bind(observation.safeRemaining, to: statement, index: 7)
+        try Self.bind(observation.probabilityWithinHorizon, to: statement, index: 8)
+        try Self.bind(observation.horizon, to: statement, index: 9)
+        try Self.bind(Double(observation.sampleCount), to: statement, index: 10)
+        try Self.bind(observation.scope.rawValue, to: statement, index: 11)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(Self.errorMessage(database.pointer))
+        }
+    }
+
+    public func forecastObservations(since date: Date? = nil) throws -> [CodexForecastObservation] {
+        try Self.loadForecastObservations(since: date, from: database.pointer)
     }
 
     public func saveCheckIn(
@@ -247,10 +399,12 @@ public actor TaskActivityStore {
 
     public func clearHistory() throws {
         try Self.execute(
-            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; PRAGMA wal_checkpoint(TRUNCATE);",
+            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; DELETE FROM goal_activity; DELETE FROM swarm_activity; DELETE FROM forecast_observation; PRAGMA wal_checkpoint(TRUNCATE);",
             on: database.pointer
         )
         activities.removeAll()
+        goalsByID.removeAll()
+        swarmsByID.removeAll()
         contexts.removeAll()
         currentTurnID = nil
     }
@@ -380,6 +534,7 @@ public actor TaskActivityStore {
         in database: OpaquePointer
     ) throws {
         let taskCutoff = cutoff.timeIntervalSince1970
+        let goalCutoff = Date().addingTimeInterval(-goalRetentionDuration).timeIntervalSince1970
         let checkInCutoff = checkInCutoff.timeIntervalSince1970
         try execute(
             """
@@ -389,6 +544,13 @@ public actor TaskActivityStore {
             WHERE COALESCE(last_event_at, completed_at, started_at, 0) < \(taskCutoff)
               AND status NOT IN ('queued', 'working', 'needsApproval', 'needsInput');
             DELETE FROM daily_work_checkin WHERE day_start < \(checkInCutoff);
+            DELETE FROM goal_activity
+            WHERE updated_at < \(goalCutoff)
+              AND status <> 'active';
+            DELETE FROM swarm_activity
+            WHERE COALESCE(completed_at, first_spawned_at, 0) < \(taskCutoff)
+              AND completed_at IS NOT NULL;
+            DELETE FROM forecast_observation WHERE observed_at < \(taskCutoff);
             """,
             on: database
         )
@@ -567,6 +729,191 @@ public actor TaskActivityStore {
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw TaskActivityStoreError.queryFailed(Self.errorMessage(database))
+        }
+    }
+
+    private static func upsert(_ goal: CodexGoalActivity, in database: OpaquePointer) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO goal_activity (goal_id, thread_id, created_at, updated_at, status, active_duration, working_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(goal_id) DO UPDATE SET
+                thread_id = excluded.thread_id,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                status = excluded.status,
+                active_duration = excluded.active_duration,
+                working_directory = excluded.working_directory;
+            """,
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(goal.id, to: statement, index: 1)
+        try bind(goal.threadID, to: statement, index: 2)
+        try bind(goal.createdAt.timeIntervalSince1970, to: statement, index: 3)
+        try bind(goal.updatedAt.timeIntervalSince1970, to: statement, index: 4)
+        try bind(goal.status.rawValue, to: statement, index: 5)
+        try bind(goal.activeDuration, to: statement, index: 6)
+        try bind(goal.workingDirectory, to: statement, index: 7)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(Self.errorMessage(database))
+        }
+    }
+
+    private static func upsert(_ swarm: CodexSwarmActivity, in database: OpaquePointer) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO swarm_activity (parent_task_id, session_id, turn_id, first_spawned_at, agent_count, completed_at, working_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(parent_task_id) DO UPDATE SET
+                session_id = excluded.session_id,
+                turn_id = excluded.turn_id,
+                first_spawned_at = excluded.first_spawned_at,
+                agent_count = excluded.agent_count,
+                completed_at = excluded.completed_at,
+                working_directory = excluded.working_directory;
+            """,
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(swarm.parentTaskID, to: statement, index: 1)
+        try bind(swarm.sessionID, to: statement, index: 2)
+        try bind(swarm.turnID, to: statement, index: 3)
+        try bind(swarm.firstSpawnedAt.timeIntervalSince1970, to: statement, index: 4)
+        try bind(Double(swarm.agentCount), to: statement, index: 5)
+        try bind(swarm.completedAt?.timeIntervalSince1970, to: statement, index: 6)
+        try bind(swarm.workingDirectory, to: statement, index: 7)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(Self.errorMessage(database))
+        }
+    }
+
+    private static func loadGoals(from database: OpaquePointer) throws -> [String: CodexGoalActivity] {
+        let statement = try prepare(
+            "SELECT goal_id, thread_id, created_at, updated_at, status, active_duration, working_directory FROM goal_activity ORDER BY updated_at DESC;",
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        var goals: [String: CodexGoalActivity] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let goalID = stringColumn(statement, index: 0),
+                  let threadID = stringColumn(statement, index: 1),
+                  let createdAt = dateColumn(statement, index: 2),
+                  let updatedAt = dateColumn(statement, index: 3),
+                  let rawStatus = stringColumn(statement, index: 4),
+                  let status = CodexGoalStatus(rawValue: rawStatus),
+                  let activeDuration = doubleColumn(statement, index: 5)
+            else { continue }
+            let goal = CodexGoalActivity(
+                threadID: threadID,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                status: status,
+                activeDuration: activeDuration,
+                workingDirectory: stringColumn(statement, index: 6)
+            )
+            goals[goalID] = goal
+        }
+        return goals
+    }
+
+    private static func loadSwarms(from database: OpaquePointer) throws -> [String: CodexSwarmActivity] {
+        let statement = try prepare(
+            "SELECT parent_task_id, session_id, turn_id, first_spawned_at, agent_count, completed_at, working_directory FROM swarm_activity ORDER BY first_spawned_at DESC;",
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        var swarms: [String: CodexSwarmActivity] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let parentTaskID = stringColumn(statement, index: 0),
+                  let sessionID = stringColumn(statement, index: 1),
+                  let turnID = stringColumn(statement, index: 2),
+                  let firstSpawnedAt = dateColumn(statement, index: 3),
+                  let agentCount = doubleColumn(statement, index: 4)
+            else { continue }
+            let swarm = CodexSwarmActivity(
+                parentTaskID: parentTaskID,
+                sessionID: sessionID,
+                turnID: turnID,
+                firstSpawnedAt: firstSpawnedAt,
+                agentCount: Int(agentCount),
+                completedAt: dateColumn(statement, index: 5),
+                workingDirectory: stringColumn(statement, index: 6)
+            )
+            swarms[parentTaskID] = swarm
+        }
+        return swarms
+    }
+
+    private static func loadForecastObservations(
+        since date: Date?,
+        from database: OpaquePointer
+    ) throws -> [CodexForecastObservation] {
+        let statement = try prepare(
+            """
+            SELECT observation_id, entity_type, entity_id, observed_at, elapsed_duration,
+                   median_remaining, safe_remaining, probability, horizon, sample_count,
+                   scope, actual_duration, actual_status
+            FROM forecast_observation
+            WHERE (? IS NULL OR observed_at >= ?)
+            ORDER BY observed_at ASC;
+            """,
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        let timestamp = date?.timeIntervalSince1970
+        try bind(timestamp, to: statement, index: 1)
+        try bind(timestamp, to: statement, index: 2)
+
+        var observations: [CodexForecastObservation] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = stringColumn(statement, index: 0),
+                  let rawEntityType = stringColumn(statement, index: 1),
+                  let entityType = CodexForecastEntityType(rawValue: rawEntityType),
+                  let entityID = stringColumn(statement, index: 2),
+                  let observedAt = dateColumn(statement, index: 3),
+                  let elapsedDuration = doubleColumn(statement, index: 4),
+                  let rawScope = stringColumn(statement, index: 10),
+                  let scope = CodexTaskDurationEstimateScope(rawValue: rawScope),
+                  let sampleCount = doubleColumn(statement, index: 9)
+            else { continue }
+            observations.append(CodexForecastObservation(
+                id: id,
+                entityType: entityType,
+                entityID: entityID,
+                observedAt: observedAt,
+                elapsedDuration: elapsedDuration,
+                medianRemaining: doubleColumn(statement, index: 5),
+                safeRemaining: doubleColumn(statement, index: 6),
+                probabilityWithinHorizon: doubleColumn(statement, index: 7),
+                horizon: doubleColumn(statement, index: 8),
+                sampleCount: Int(sampleCount),
+                scope: scope,
+                actualDuration: doubleColumn(statement, index: 11),
+                actualStatus: stringColumn(statement, index: 12)
+            ))
+        }
+        return observations
+    }
+
+    private static func markForecasts(
+        entityType: CodexForecastEntityType,
+        entityID: String,
+        actualDuration: TimeInterval,
+        actualStatus: String,
+        in database: OpaquePointer
+    ) throws {
+        let statement = try prepare(
+            "UPDATE forecast_observation SET actual_duration = ?, actual_status = ? WHERE entity_type = ? AND entity_id = ? AND actual_duration IS NULL;",
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(actualDuration, to: statement, index: 1)
+        try bind(actualStatus, to: statement, index: 2)
+        try bind(entityType.rawValue, to: statement, index: 3)
+        try bind(entityID, to: statement, index: 4)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(errorMessage(database))
         }
     }
 

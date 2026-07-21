@@ -24,6 +24,143 @@ public enum CodexSessionLogEvent: Equatable, Sendable {
         duration: TimeInterval,
         timeToFirstToken: TimeInterval?
     )
+    case goalUpdated(CodexGoalActivity)
+    case swarmAgentSpawned(occurredAt: Date)
+}
+
+public enum CodexGoalStatus: String, Codable, Sendable {
+    case active
+    case paused
+    case complete
+    case blocked
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = CodexGoalStatus(rawValue: value) ?? .paused
+    }
+}
+
+public struct CodexGoalActivity: Equatable, Identifiable, Sendable {
+    public let threadID: String
+    public let createdAt: Date
+    public var updatedAt: Date
+    public var status: CodexGoalStatus
+    public var activeDuration: TimeInterval
+    public var workingDirectory: String?
+
+    public var id: String {
+        "\(threadID):\(createdAt.timeIntervalSince1970)"
+    }
+
+    public var wallDuration: TimeInterval {
+        max(0, updatedAt.timeIntervalSince(createdAt))
+    }
+
+    public var isActive: Bool { status == .active }
+    public var isTerminal: Bool { status == .complete || status == .blocked }
+
+    public init(
+        threadID: String,
+        createdAt: Date,
+        updatedAt: Date,
+        status: CodexGoalStatus,
+        activeDuration: TimeInterval,
+        workingDirectory: String? = nil
+    ) {
+        self.threadID = threadID
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.status = status
+        self.activeDuration = max(0, activeDuration)
+        self.workingDirectory = workingDirectory
+    }
+}
+
+public struct CodexSwarmActivity: Equatable, Identifiable, Sendable {
+    public let parentTaskID: String
+    public let sessionID: String
+    public let turnID: String
+    public var firstSpawnedAt: Date
+    public var agentCount: Int
+    public var completedAt: Date?
+    public var workingDirectory: String?
+
+    public var id: String { parentTaskID }
+    public var isActive: Bool { completedAt == nil }
+
+    public init(
+        parentTaskID: String,
+        sessionID: String,
+        turnID: String,
+        firstSpawnedAt: Date,
+        agentCount: Int = 1,
+        completedAt: Date? = nil,
+        workingDirectory: String? = nil
+    ) {
+        self.parentTaskID = parentTaskID
+        self.sessionID = sessionID
+        self.turnID = turnID
+        self.firstSpawnedAt = firstSpawnedAt
+        self.agentCount = max(1, agentCount)
+        self.completedAt = completedAt
+        self.workingDirectory = workingDirectory
+    }
+
+    public var duration: TimeInterval? {
+        guard let completedAt else { return nil }
+        return max(0, completedAt.timeIntervalSince(firstSpawnedAt))
+    }
+}
+
+public enum CodexForecastEntityType: String, Codable, Sendable {
+    case goal
+    case swarm
+}
+
+public struct CodexForecastObservation: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let entityType: CodexForecastEntityType
+    public let entityID: String
+    public let observedAt: Date
+    public let elapsedDuration: TimeInterval
+    public let medianRemaining: TimeInterval?
+    public let safeRemaining: TimeInterval?
+    public let probabilityWithinHorizon: Double?
+    public let horizon: TimeInterval?
+    public let sampleCount: Int
+    public let scope: CodexTaskDurationEstimateScope
+    public let actualDuration: TimeInterval?
+    public let actualStatus: String?
+
+    public init(
+        id: String,
+        entityType: CodexForecastEntityType,
+        entityID: String,
+        observedAt: Date,
+        elapsedDuration: TimeInterval,
+        medianRemaining: TimeInterval?,
+        safeRemaining: TimeInterval?,
+        probabilityWithinHorizon: Double?,
+        horizon: TimeInterval?,
+        sampleCount: Int,
+        scope: CodexTaskDurationEstimateScope,
+        actualDuration: TimeInterval? = nil,
+        actualStatus: String? = nil
+    ) {
+        self.id = id
+        self.entityType = entityType
+        self.entityID = entityID
+        self.observedAt = observedAt
+        self.elapsedDuration = max(0, elapsedDuration)
+        self.medianRemaining = medianRemaining
+        self.safeRemaining = safeRemaining
+        self.probabilityWithinHorizon = probabilityWithinHorizon
+        self.horizon = horizon
+        self.sampleCount = max(0, sampleCount)
+        self.scope = scope
+        self.actualDuration = actualDuration
+        self.actualStatus = actualStatus
+    }
 }
 
 public enum CodexTaskStatus: String, Codable, Sendable {

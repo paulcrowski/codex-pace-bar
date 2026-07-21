@@ -114,6 +114,137 @@ struct TaskActivityStoreTests {
     }
 
     @Test
+    func persistsGoalLifecycleAndSwarmAggregateAcrossReload() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let start = Date(timeIntervalSince1970: 1_784_372_000)
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+
+        try await store.apply(.sessionDiscovered(sessionID: "session", workingDirectory: "/work/project"))
+        try await store.apply(.turnContext(
+            turnID: "turn",
+            model: "gpt-5.6",
+            effort: "high",
+            workingDirectory: "/work/project"
+        ))
+        try await store.apply(.turnStarted(turnID: "turn", startedAt: start))
+        try await store.apply(.goalUpdated(CodexGoalActivity(
+            threadID: "session",
+            createdAt: start,
+            updatedAt: start.addingTimeInterval(60),
+            status: .active,
+            activeDuration: 60,
+            workingDirectory: "/work/project"
+        )))
+        try await store.apply(.swarmAgentSpawned(occurredAt: start.addingTimeInterval(70)))
+        try await store.apply(.swarmAgentSpawned(occurredAt: start.addingTimeInterval(71)))
+        try await store.apply(.turnCompleted(
+            turnID: "turn",
+            completedAt: start.addingTimeInterval(120),
+            duration: 120,
+            timeToFirstToken: nil
+        ))
+        try await store.apply(.goalUpdated(CodexGoalActivity(
+            threadID: "session",
+            createdAt: start,
+            updatedAt: start.addingTimeInterval(120),
+            status: .complete,
+            activeDuration: 120,
+            workingDirectory: "/work/project"
+        )))
+
+        let restartedStore = try TaskActivityStore(databaseURL: databaseURL)
+        let goal = try #require(await restartedStore.goals().first)
+        let swarm = try #require(await restartedStore.swarms().first)
+        #expect(goal.status == .complete)
+        #expect(goal.activeDuration == 120)
+        #expect(swarm.agentCount == 2)
+        #expect(swarm.duration == 50)
+    }
+
+    @Test
+    func keepsCompletedGoalsForFortyFiveDaysButPrunesOlderHistory() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let now = Date()
+        let store = try TaskActivityStore(databaseURL: databaseURL)
+
+        let recentGoal = CodexGoalActivity(
+            threadID: "recent",
+            createdAt: now.addingTimeInterval(-40 * 24 * 60 * 60),
+            updatedAt: now.addingTimeInterval(-40 * 24 * 60 * 60),
+            status: .complete,
+            activeDuration: 120
+        )
+        let oldGoal = CodexGoalActivity(
+            threadID: "old",
+            createdAt: now.addingTimeInterval(-46 * 24 * 60 * 60),
+            updatedAt: now.addingTimeInterval(-46 * 24 * 60 * 60),
+            status: .complete,
+            activeDuration: 120
+        )
+        let longRunningGoal = CodexGoalActivity(
+            threadID: "active",
+            createdAt: now.addingTimeInterval(-46 * 24 * 60 * 60),
+            updatedAt: now,
+            status: .active,
+            activeDuration: 120
+        )
+        try await store.apply(.goalUpdated(recentGoal))
+        try await store.apply(.goalUpdated(oldGoal))
+        try await store.apply(.goalUpdated(longRunningGoal))
+
+        let restartedStore = try TaskActivityStore(databaseURL: databaseURL)
+        let goals = try await restartedStore.goals()
+
+        #expect(goals.contains { $0.threadID == "recent" })
+        #expect(!goals.contains { $0.threadID == "old" })
+        #expect(goals.contains { $0.threadID == "active" })
+    }
+
+    @Test
+    func linksForecastObservationToTerminalGoalOutcome() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let start = Date(timeIntervalSince1970: 1_784_372_000)
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+        let goal = CodexGoalActivity(
+            threadID: "session",
+            createdAt: start,
+            updatedAt: start.addingTimeInterval(30),
+            status: .active,
+            activeDuration: 30
+        )
+        try await store.apply(.goalUpdated(goal))
+        try await store.recordForecast(CodexForecastObservation(
+            id: "goal:\(goal.id):0",
+            entityType: .goal,
+            entityID: goal.id,
+            observedAt: start.addingTimeInterval(30),
+            elapsedDuration: 30,
+            medianRemaining: 60,
+            safeRemaining: 120,
+            probabilityWithinHorizon: 0.8,
+            horizon: 1_800,
+            sampleCount: 12,
+            scope: .project
+        ))
+
+        #expect(try await store.forecastObservations().first?.actualDuration == nil)
+        try await store.apply(.goalUpdated(CodexGoalActivity(
+            threadID: "session",
+            createdAt: start,
+            updatedAt: start.addingTimeInterval(150),
+            status: .blocked,
+            activeDuration: 150
+        )))
+
+        let observation = try #require(await store.forecastObservations().first)
+        #expect(observation.actualDuration == 150)
+        #expect(observation.actualStatus == "blocked")
+    }
+
+    @Test
     func laterTurnContextBackfillsMissingProjectMetadata() async throws {
         let databaseURL = try makeDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }

@@ -25,6 +25,8 @@ final class TaskMonitorNotificationController {
 
     func notifyIfNeeded(
         for tasks: [CodexTaskActivity],
+        goals: [CodexGoalActivity] = [],
+        swarms: [CodexSwarmActivity] = [],
         localEnabled: Bool,
         mobileEnabled: Bool,
         mobileTopic: String,
@@ -46,7 +48,7 @@ final class TaskMonitorNotificationController {
         previousSilentGoalsAndSwarmsEnabled = silentGoalsAndSwarmsEnabled
         if !mobileBaselinePrepared || configurationChanged {
             mobileService.discardPendingCompletionBatch()
-            mobileService.prime(with: tasks)
+            mobileService.prime(with: tasks, goals: goals, swarms: swarms)
             mobileBaselinePrepared = true
             return
         }
@@ -58,6 +60,8 @@ final class TaskMonitorNotificationController {
                 topic: mobileTopic,
                 includeDetails: mobileDetailsEnabled,
                 silentGoalsAndSwarmsEnabled: silentGoalsAndSwarmsEnabled,
+                goals: goals,
+                swarms: swarms,
                 now: now
             )
         }

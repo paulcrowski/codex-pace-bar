@@ -207,7 +207,7 @@ struct SettingsView: View {
                 icon: "moon.stars",
                 title: "Swarms / Goals Silent",
                 subtitle: settings.mobileTaskNotificationsEnabled
-                    ? "Batches finished alerts after 90 seconds of quiet. Needs you stays instant."
+                    ? "One alert when a detected goal or swarm ends. Needs you stays instant."
                     : "Enable Phone notifications to silence goal and swarm completion noise."
             ) {
                 Toggle("Swarms and goals silent", isOn: $settings.silentGoalsAndSwarmsEnabled)

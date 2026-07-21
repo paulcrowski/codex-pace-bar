@@ -8,12 +8,16 @@ import Observation
 final class TaskMonitorViewModel {
     private let coordinator: TaskMonitorCoordinator
     private let estimator = CodexTaskDurationEstimator()
+    private let goalEstimator = CodexGoalDurationEstimator()
+    private let swarmEstimator = CodexSwarmDurationEstimator()
     private let rhythmEstimator = CodexWorkRhythmEstimator()
     private let checkInPolicy = CodexDailyCheckInPolicy()
     private let summaryCalculator = CodexTaskDailySummaryCalculator()
     private let navigator = TaskNavigator()
     private var healthTracker = CodexTaskMonitorHealthTracker()
     private(set) var tasks: [CodexTaskActivity] = []
+    private(set) var goals: [CodexGoalActivity] = []
+    private(set) var swarms: [CodexSwarmActivity] = []
     private(set) var events: [CodexTaskStatusEvent] = []
     private(set) var checkIns: [CodexDailyWorkCheckIn] = []
     private(set) var lastReloadDate: Date?
@@ -28,6 +32,7 @@ final class TaskMonitorViewModel {
     private var reloadRequested = false
     var focusLoadEnabled: Bool
     var onTasksReloaded: (([CodexTaskActivity]) -> Void)?
+    var onActivityReloaded: (([CodexTaskActivity], [CodexGoalActivity], [CodexSwarmActivity]) -> Void)?
 
     init(coordinator: TaskMonitorCoordinator, focusLoadEnabled: Bool = false) {
         self.coordinator = coordinator
@@ -57,9 +62,13 @@ final class TaskMonitorViewModel {
                     let dayStart = Calendar.current.startOfDay(for: currentReloadDate)
                     let checkInStart = currentReloadDate.addingTimeInterval(-90 * 24 * 60 * 60)
                     async let loadedTasks = coordinator.tasks()
+                    async let loadedGoals = coordinator.goals()
+                    async let loadedSwarms = coordinator.swarms()
                     async let loadedEvents = coordinator.statusEvents(since: dayStart)
                     async let loadedCheckIns = coordinator.checkIns(since: checkInStart)
                     tasks = try await loadedTasks
+                    goals = try await loadedGoals
+                    swarms = try await loadedSwarms
                     events = try await loadedEvents
                     checkIns = try await loadedCheckIns
                     todaySummary = summaryCalculator.calculate(
@@ -72,6 +81,7 @@ final class TaskMonitorViewModel {
                     healthTracker.markReady()
                     health = healthTracker.state
                     onTasksReloaded?(tasks)
+                    onActivityReloaded?(tasks, goals, swarms)
                 } catch {
                     healthTracker.markStale(message: Self.userFacingErrorMessage(for: error))
                     health = healthTracker.state
@@ -93,6 +103,24 @@ final class TaskMonitorViewModel {
     func hasActiveTasks(at now: Date) -> Bool {
         !needsYou(at: now).isEmpty || !working(at: now).isEmpty
     }
+
+    func activeGoal(at now: Date) -> CodexGoalActivity? {
+        goals.first { goal in
+            goal.isActive
+                && goal.updatedAt <= now
+                && now.timeIntervalSince(goal.updatedAt) <= Self.aggregateFreshnessWindow
+        }
+    }
+
+    func activeSwarm(at now: Date) -> CodexSwarmActivity? {
+        swarms.first { swarm in
+            swarm.isActive
+                && swarm.firstSpawnedAt <= now
+                && now.timeIntervalSince(swarm.firstSpawnedAt) <= Self.aggregateFreshnessWindow
+        }
+    }
+
+    private static let aggregateFreshnessWindow: TimeInterval = 2 * 60 * 60
 
     func recentlyFinished(at now: Date) -> [CodexTaskActivity] {
         let start = Calendar.current.startOfDay(for: now)
@@ -116,6 +144,78 @@ final class TaskMonitorViewModel {
             now: now,
             history: tasks
         )
+    }
+
+    func goalEstimate(for goal: CodexGoalActivity, now: Date) -> CodexTaskDurationEstimate? {
+        let estimate = goalEstimator.estimate(for: goal, now: now, history: goals)
+        recordForecast(
+            entityType: .goal,
+            entityID: goal.id,
+            elapsedDuration: goal.activeDuration,
+            estimate: estimate,
+            forecast: nil,
+            now: now
+        )
+        return estimate
+    }
+
+    func goalCompletionForecast(
+        for goal: CodexGoalActivity,
+        within horizon: TimeInterval,
+        now: Date
+    ) -> CodexTaskCompletionForecast? {
+        let estimate = goalEstimator.estimate(for: goal, now: now, history: goals)
+        let forecast = goalEstimator.completionForecast(for: goal, within: horizon, now: now, history: goals)
+        recordForecast(
+            entityType: .goal,
+            entityID: goal.id,
+            elapsedDuration: goal.activeDuration,
+            estimate: estimate,
+            forecast: forecast,
+            now: now
+        )
+        return forecast
+    }
+
+    func swarmEstimate(for swarm: CodexSwarmActivity, now: Date) -> CodexTaskDurationEstimate? {
+        let estimate = swarmEstimator.estimate(for: swarm, now: now, history: swarms)
+        recordForecast(
+            entityType: .swarm,
+            entityID: swarm.id,
+            elapsedDuration: max(0, now.timeIntervalSince(swarm.firstSpawnedAt)),
+            estimate: estimate,
+            forecast: nil,
+            now: now
+        )
+        return estimate
+    }
+
+    private func recordForecast(
+        entityType: CodexForecastEntityType,
+        entityID: String,
+        elapsedDuration: TimeInterval,
+        estimate: CodexTaskDurationEstimate?,
+        forecast: CodexTaskCompletionForecast?,
+        now: Date
+    ) {
+        guard let estimate else { return }
+        let bucket = Int(max(0, elapsedDuration) / (5 * 60))
+        let observation = CodexForecastObservation(
+            id: "\(entityType.rawValue):\(entityID):\(bucket)",
+            entityType: entityType,
+            entityID: entityID,
+            observedAt: now,
+            elapsedDuration: elapsedDuration,
+            medianRemaining: estimate.medianRemaining,
+            safeRemaining: estimate.safeRemaining,
+            probabilityWithinHorizon: forecast?.probability,
+            horizon: forecast?.horizon,
+            sampleCount: estimate.sampleCount,
+            scope: estimate.scope
+        )
+        Task { @MainActor [weak self] in
+            try? await self?.coordinator.recordForecast(observation)
+        }
     }
 
     func typicalDuration(at now: Date) -> CodexTaskDurationDistribution? {
@@ -167,6 +267,8 @@ final class TaskMonitorViewModel {
             do {
                 try await coordinator.clearHistory()
                 tasks = []
+                goals = []
+                swarms = []
                 events = []
                 checkIns = []
                 todaySummary = CodexTaskDailySummary(

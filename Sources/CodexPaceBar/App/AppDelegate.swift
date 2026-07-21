@@ -229,10 +229,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 coordinator: monitor,
                 focusLoadEnabled: settings.focusLoadEnabled
             )
-            model.onTasksReloaded = { [weak self] tasks in
+            model.onActivityReloaded = { [weak self] tasks, goals, swarms in
                 guard let self else { return }
                 self.taskNotificationController.notifyIfNeeded(
                     for: tasks,
+                    goals: goals,
+                    swarms: swarms,
                     localEnabled: self.settings.taskNotificationsEnabled,
                     mobileEnabled: self.settings.mobileTaskNotificationsEnabled,
                     mobileTopic: self.settings.mobileNotificationTopic,

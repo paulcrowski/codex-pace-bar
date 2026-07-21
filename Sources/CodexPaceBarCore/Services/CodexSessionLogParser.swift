@@ -42,8 +42,19 @@ public struct CodexSessionLogParser: Sendable {
         case "response_item":
             guard let timestamp = envelope.timestamp else { return nil }
             if (envelope.payload.type == "function_call" || envelope.payload.type == "custom_tool_call"),
+               envelope.payload.name == "spawn_agent" {
+                return .swarmAgentSpawned(occurredAt: timestamp)
+            }
+            if (envelope.payload.type == "function_call" || envelope.payload.type == "custom_tool_call"),
                envelope.payload.name == "request_user_input" {
                 return .currentTurnStatusChanged(status: .needsInput, occurredAt: timestamp)
+            }
+            if envelope.payload.type == "function_call_output"
+                || envelope.payload.type == "custom_tool_call_output" {
+                let outputText = envelope.payload.output?.text ?? ""
+                if let goal = parseGoal(from: outputText) {
+                    return .goalUpdated(goal)
+                }
             }
             if envelope.payload.type == "function_call_output"
                 || envelope.payload.type == "custom_tool_call_output" {
@@ -57,9 +68,17 @@ public struct CodexSessionLogParser: Sendable {
     }
 
     private func parseEventMessage(_ payload: Payload, timestamp: Date?) -> CodexSessionLogEvent? {
-        guard let eventType = payload.type,
-              let turnID = payload.turnID
-        else {
+        guard let eventType = payload.type else {
+            return nil
+        }
+
+        if eventType == "thread_goal_updated",
+           let goal = payload.goal,
+           let activity = goal.activity {
+            return .goalUpdated(activity)
+        }
+
+        guard let turnID = payload.turnID else {
             return nil
         }
 
@@ -105,6 +124,21 @@ public struct CodexSessionLogParser: Sendable {
         }
     }
 
+    private func parseGoal(from output: String) -> CodexGoalActivity? {
+        for line in output.split(whereSeparator: \.isNewline).reversed() {
+            guard let start = line.firstIndex(of: "{") else { continue }
+            let candidate = String(line[start...])
+            guard let data = candidate.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let goalObject = object["goal"] as? [String: Any],
+                  let goalData = try? JSONSerialization.data(withJSONObject: goalObject),
+                  let goal = try? JSONDecoder().decode(GoalPayload.self, from: goalData)
+            else { continue }
+            return goal.activity
+        }
+        return nil
+    }
+
     private struct Envelope: Decodable {
         let type: String
         let payload: Payload
@@ -119,7 +153,8 @@ public struct CodexSessionLogParser: Sendable {
             if let seconds = try? container.decode(TimeInterval.self, forKey: .timestamp) {
                 timestamp = Date(timeIntervalSince1970: seconds)
             } else if let value = try? container.decode(String.self, forKey: .timestamp) {
-                timestamp = ISO8601DateFormatter().date(from: value)
+                timestamp = (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(value))
+                    ?? (try? Date.ISO8601FormatStyle().parse(value))
             } else {
                 timestamp = nil
             }
@@ -139,6 +174,8 @@ public struct CodexSessionLogParser: Sendable {
         let durationMilliseconds: TimeInterval?
         let timeToFirstTokenMilliseconds: TimeInterval?
         let name: String?
+        let output: OutputValue?
+        let goal: GoalPayload?
 
         enum CodingKeys: String, CodingKey {
             case type
@@ -153,6 +190,65 @@ public struct CodexSessionLogParser: Sendable {
             case durationMilliseconds = "duration_ms"
             case timeToFirstTokenMilliseconds = "time_to_first_token_ms"
             case name
+            case output
+            case goal
+        }
+    }
+
+    private enum OutputValue: Decodable {
+        case text(String)
+        case parts([OutputPart])
+
+        init(from decoder: Decoder) throws {
+            if let value = try? decoder.singleValueContainer().decode(String.self) {
+                self = .text(value)
+            } else {
+                self = .parts(try decoder.singleValueContainer().decode([OutputPart].self))
+            }
+        }
+
+        var text: String {
+            switch self {
+            case let .text(value): value
+            case let .parts(parts): parts.compactMap(\.text).joined(separator: "\n")
+            }
+        }
+    }
+
+    private struct OutputPart: Decodable {
+        let text: String?
+    }
+
+    private struct GoalPayload: Decodable {
+        let threadID: String
+        let createdAt: TimeInterval
+        let updatedAt: TimeInterval
+        let status: CodexGoalStatus
+        let timeUsedSeconds: TimeInterval
+
+        enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case createdAt
+            case updatedAt
+            case status
+            case timeUsedSeconds
+        }
+
+        var activity: CodexGoalActivity? {
+            guard threadID.isEmpty == false,
+                  createdAt.isFinite,
+                  updatedAt.isFinite,
+                  timeUsedSeconds.isFinite,
+                  updatedAt >= createdAt,
+                  timeUsedSeconds >= 0
+            else { return nil }
+            return CodexGoalActivity(
+                threadID: threadID,
+                createdAt: Date(timeIntervalSince1970: createdAt),
+                updatedAt: Date(timeIntervalSince1970: updatedAt),
+                status: status,
+                activeDuration: timeUsedSeconds
+            )
         }
     }
 }

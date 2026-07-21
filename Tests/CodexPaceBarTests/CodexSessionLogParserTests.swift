@@ -96,4 +96,71 @@ struct CodexSessionLogParserTests {
         #expect(unknown == nil)
         #expect(malformed == nil)
     }
+
+    @Test
+    func parsesNativeGoalUpdateWithoutPersistingObjectiveText() throws {
+        let line = #"{"timestamp":"2026-07-21T10:00:00Z","type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"goal-thread","objective":"private prompt","status":"active","tokensUsed":123,"timeUsedSeconds":7200,"createdAt":1784628000,"updatedAt":1784635200}}}"#
+
+        #expect(parser.parseLine(line) == .goalUpdated(CodexGoalActivity(
+            threadID: "goal-thread",
+            createdAt: Date(timeIntervalSince1970: 1_784_628_000),
+            updatedAt: Date(timeIntervalSince1970: 1_784_635_200),
+            status: .active,
+            activeDuration: 7_200
+        )))
+    }
+
+    @Test
+    func keepsPausedGoalsForLaterContinuation() throws {
+        let line = #"{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"goal-thread","status":"paused","timeUsedSeconds":3600,"createdAt":1784628000,"updatedAt":1784631600}}}"#
+
+        #expect(parser.parseLine(line) == .goalUpdated(CodexGoalActivity(
+            threadID: "goal-thread",
+            createdAt: Date(timeIntervalSince1970: 1_784_628_000),
+            updatedAt: Date(timeIntervalSince1970: 1_784_631_600),
+            status: .paused,
+            activeDuration: 3_600
+        )))
+    }
+
+    @Test
+    func parsesGoalTerminalResultFromStructuredToolOutput() throws {
+        let line = #"{"timestamp":"2026-07-21T10:01:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":[{"type":"input_text","text":"Script completed\n{\"goal\":{\"threadId\":\"goal-thread\",\"createdAt\":1784628000,\"updatedAt\":1784635260,\"status\":\"complete\",\"timeUsedSeconds\":7260}}"}]}}"#
+
+        #expect(parser.parseLine(line) == .goalUpdated(CodexGoalActivity(
+            threadID: "goal-thread",
+            createdAt: Date(timeIntervalSince1970: 1_784_628_000),
+            updatedAt: Date(timeIntervalSince1970: 1_784_635_260),
+            status: .complete,
+            activeDuration: 7_260
+        )))
+    }
+
+    @Test
+    func parsesGoalResultWithTrailingBudgetFields() throws {
+        let line = #"{"timestamp":"2026-07-21T10:01:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":[{"type":"input_text","text":"Script completed\n{\"goal\":{\"threadId\":\"goal-thread\",\"objective\":\"private\",\"status\":\"complete\",\"tokensUsed\":14534938,\"timeUsedSeconds\":48976,\"createdAt\":1784104609,\"updatedAt\":1784189737},\"remainingTokens\":null,\"completionBudgetReport\":null}"}]}}"#
+        let envelope = try #require(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let output = try #require((((envelope["payload"] as? [String: Any])?["output"] as? [[String: Any]])?.first?["text"] as? String))
+        let candidate = String(output.split(whereSeparator: \.isNewline).last!)
+        let parsedCandidate = try? JSONSerialization.jsonObject(with: Data(candidate.utf8))
+        #expect(parsedCandidate != nil)
+        #expect((parsedCandidate as? [String: Any])?["goal"] as? [String: Any] != nil)
+
+        #expect(parser.parseLine(line) == .goalUpdated(CodexGoalActivity(
+            threadID: "goal-thread",
+            createdAt: Date(timeIntervalSince1970: 1_784_104_609),
+            updatedAt: Date(timeIntervalSince1970: 1_784_189_737),
+            status: .complete,
+            activeDuration: 48_976
+        )))
+    }
+
+    @Test
+    func parsesSpawnAgentAsAggregateMarkerWithoutReadingArguments() throws {
+        let line = #"{"timestamp":"2026-07-21T10:02:00Z","type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"private agent prompt"}}"#
+
+        #expect(parser.parseLine(line) == .swarmAgentSpawned(
+            occurredAt: ISO8601DateFormatter().date(from: "2026-07-21T10:02:00Z")!
+        ))
+    }
 }

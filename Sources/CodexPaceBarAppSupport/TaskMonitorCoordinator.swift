@@ -26,6 +26,7 @@ public final class TaskMonitorCoordinator {
     private var directoryWatchers: [URL: CodexSessionLogDirectoryWatcher] = [:]
     private var hookEventWatcher: CodexHookEventWatcher?
     private var rescanTask: Task<Void, Never>?
+    private var aggregateBackfillTask: Task<Void, Never>?
     private var isRunning = false
 
     public var onChange: (() -> Void)?
@@ -63,6 +64,7 @@ public final class TaskMonitorCoordinator {
         directoryWatchers.values.forEach { $0.stop() }
         watchers.values.forEach { $0.stop() }
         hookEventWatcher?.stop()
+        aggregateBackfillTask?.cancel()
     }
 
     public func start() throws {
@@ -73,6 +75,7 @@ public final class TaskMonitorCoordinator {
         do {
             try startHookEventWatcher()
             try rescan()
+            scheduleAggregateBackfillIfNeeded()
         } catch {
             isRunning = false
             throw error
@@ -92,6 +95,52 @@ public final class TaskMonitorCoordinator {
                 await self?.applyCatalogFiles(files)
             } catch {
                 await self?.report(error)
+            }
+        }
+    }
+
+    private func scheduleAggregateBackfillIfNeeded() {
+        guard aggregateBackfillTask == nil else { return }
+        let markerURL = databaseURL.deletingLastPathComponent()
+            .appendingPathComponent("goal-swarm-backfill-v2.done")
+        guard !FileManager.default.fileExists(atPath: markerURL.path) else { return }
+
+        let catalog = self.catalog
+        let queryStore = self.queryStore
+        aggregateBackfillTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                let candidateFiles = try catalog.recentLogFiles(
+                    limit: 5_000,
+                    maximumAge: TaskActivityStore.goalRetentionDuration
+                )
+                // A single long-running Codex session can be hundreds of MB.
+                // Keep the first-run repair bounded so it cannot monopolize
+                // the menu-bar app; normal live watchers continue filling new
+                // aggregate rows after this pass.
+                let files = try await aggregateBackfillFiles(candidateFiles)
+                let parser = CodexSessionLogParser()
+                for fileURL in files {
+                    guard !Task.isCancelled else { return }
+                    try await scanAggregateEvents(from: fileURL, parser: parser) { event in
+                        try await queryStore.apply(event)
+                    }
+                }
+                try Data("v1".utf8).write(to: markerURL, options: .atomic)
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: markerURL.path
+                )
+                await MainActor.run {
+                    self?.aggregateBackfillTask = nil
+                    self?.onChange?()
+                }
+            } catch is CancellationError {
+                await MainActor.run { self?.aggregateBackfillTask = nil }
+            } catch {
+                await MainActor.run {
+                    self?.aggregateBackfillTask = nil
+                    self?.onError?(error)
+                }
             }
         }
     }
@@ -139,6 +188,22 @@ public final class TaskMonitorCoordinator {
 
     public func statusEvents(since date: Date) async throws -> [CodexTaskStatusEvent] {
         try await queryStore.statusEvents(since: date)
+    }
+
+    public func goals() async throws -> [CodexGoalActivity] {
+        try await queryStore.goals()
+    }
+
+    public func swarms() async throws -> [CodexSwarmActivity] {
+        try await queryStore.swarms()
+    }
+
+    public func recordForecast(_ observation: CodexForecastObservation) async throws {
+        try await queryStore.recordForecast(observation)
+    }
+
+    public func forecastObservations(since date: Date? = nil) async throws -> [CodexForecastObservation] {
+        try await queryStore.forecastObservations(since: date)
     }
 
     public func checkIns(since date: Date) async throws -> [CodexDailyWorkCheckIn] {
@@ -302,6 +367,100 @@ public final class TaskMonitorCoordinator {
         }
     }
 }
+
+private let aggregateBackfillDiscoveryBudget: UInt64 = 1_024 * 1_024 * 1_024
+private let aggregateBackfillByteBudget: UInt64 = 512 * 1_024 * 1_024
+private let aggregateBackfillMaximumFileSize: UInt64 = 256 * 1_024 * 1_024
+
+private func aggregateBackfillFiles(_ candidates: [URL]) async throws -> [URL] {
+    var total: UInt64 = 0
+    var discovered: UInt64 = 0
+    var selected: [URL] = []
+    for fileURL in candidates {
+        guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize,
+              size > 0
+        else { continue }
+        let byteSize = UInt64(size)
+        guard discovered + byteSize <= aggregateBackfillDiscoveryBudget else { break }
+        discovered += byteSize
+        guard byteSize <= aggregateBackfillMaximumFileSize,
+              try await fileContainsAggregateMarker(fileURL),
+              total + byteSize <= aggregateBackfillByteBudget else { continue }
+        selected.append(fileURL)
+        total += byteSize
+    }
+    return selected
+}
+
+private func fileContainsAggregateMarker(_ fileURL: URL) async throws -> Bool {
+    let handle = try FileHandle(forReadingFrom: fileURL)
+    defer { try? handle.close() }
+    var carry = Data()
+    while let chunk = try handle.read(upToCount: 1 * 1_024 * 1_024), !chunk.isEmpty {
+        try Task.checkCancellation()
+        carry.append(chunk)
+        if aggregateCandidateMarkers.contains(where: { carry.range(of: $0) != nil }) {
+            return true
+        }
+        let keep = min(64, carry.count)
+        carry = Data(carry.suffix(keep))
+    }
+    return false
+}
+
+private let aggregateCandidateMarkers = [
+    Data("thread_goal_updated".utf8),
+    Data("timeUsedSeconds".utf8),
+    Data("spawn_agent".utf8)
+]
+
+private func scanAggregateEvents(
+    from fileURL: URL,
+    parser: CodexSessionLogParser,
+    consume: (CodexSessionLogEvent) async throws -> Void
+) async throws {
+    let handle = try FileHandle(forReadingFrom: fileURL)
+    defer { try? handle.close() }
+
+    var buffer = Data()
+    var lineStart = buffer.startIndex
+    while let chunk = try handle.read(upToCount: 64 * 1_024), !chunk.isEmpty {
+        try Task.checkCancellation()
+        buffer.append(chunk)
+        while let newline = buffer[lineStart...].firstIndex(of: 0x0A) {
+            let line = buffer[lineStart..<newline]
+            lineStart = buffer.index(after: newline)
+            guard isAggregateLine(line), let event = parser.parseLine(Data(line)) else { continue }
+            switch event {
+            case .sessionDiscovered, .turnContext, .turnCompleted, .goalUpdated, .swarmAgentSpawned:
+                try await consume(event)
+            default:
+                continue
+            }
+        }
+        if lineStart > buffer.startIndex {
+            buffer.removeSubrange(buffer.startIndex..<lineStart)
+            lineStart = buffer.startIndex
+        }
+    }
+}
+
+private func isAggregateLine(_ line: Data) -> Bool {
+    // Keep the one-time history pass cheap: large session logs contain the
+    // word "goal" in prompts and instructions, but only these fields can
+    // produce a native aggregate event.
+    return aggregateLineMarkers.contains { line.range(of: $0) != nil }
+}
+
+private let aggregateLineMarkers = [
+    Data("session_meta".utf8),
+    Data("turn_context".utf8),
+    Data("task_complete".utf8),
+    Data("thread_goal_updated".utf8),
+    Data("spawn_agent".utf8),
+    Data("timeUsedSeconds".utf8)
+]
 
 private final class CodexHookEventWatcher: @unchecked Sendable {
     private let fileURL: URL
