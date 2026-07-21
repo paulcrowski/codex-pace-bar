@@ -20,6 +20,33 @@ struct TaskMonitorView: View {
                 )
                     .padding(.bottom, 12)
 
+                // Keep the aggregate visible while the individual turn list scrolls.
+                // Otherwise a long-running goal can be pushed above the current turn.
+                if let activeGoal {
+                    TaskSection(title: "Goal", color: .blue) {
+                        GoalMonitorRow(
+                            goal: activeGoal,
+                            estimate: model.goalEstimate(for: activeGoal, now: context.date),
+                            completionForecast: model.goalCompletionForecast(
+                                for: activeGoal,
+                                within: 30 * 60,
+                                now: context.date
+                            ),
+                            now: context.date
+                        )
+                    }
+                    .padding(.bottom, 12)
+                } else if let activeSwarm {
+                    TaskSection(title: "Swarm", color: .purple) {
+                        SwarmMonitorRow(
+                            swarm: activeSwarm,
+                            estimate: model.swarmEstimate(for: activeSwarm, now: context.date),
+                            now: context.date
+                        )
+                    }
+                    .padding(.bottom, 12)
+                }
+
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if let title = model.health.title,
@@ -52,29 +79,6 @@ struct TaskMonitorView: View {
                                         onNavigate: { model.navigate(to: task) }
                                     )
                                 }
-                            }
-                        }
-
-                        if let activeGoal {
-                            TaskSection(title: "Goal", color: .blue) {
-                                GoalMonitorRow(
-                                    goal: activeGoal,
-                                    estimate: model.goalEstimate(for: activeGoal, now: context.date),
-                                    completionForecast: model.goalCompletionForecast(
-                                        for: activeGoal,
-                                        within: 30 * 60,
-                                        now: context.date
-                                    ),
-                                    now: context.date
-                                )
-                            }
-                        } else if let activeSwarm {
-                            TaskSection(title: "Swarm", color: .purple) {
-                                SwarmMonitorRow(
-                                    swarm: activeSwarm,
-                                    estimate: model.swarmEstimate(for: activeSwarm, now: context.date),
-                                    now: context.date
-                                )
                             }
                         }
 
