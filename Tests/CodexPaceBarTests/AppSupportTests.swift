@@ -16,6 +16,11 @@ struct AppSupportTests {
         #expect(!settings.taskMonitorEnabled)
         #expect(!settings.mainTaskSummaryEnabled)
         #expect(!settings.focusLoadEnabled)
+        #expect(!settings.taskNotificationsEnabled)
+        #expect(!settings.mobileTaskNotificationsEnabled)
+        #expect(!settings.mobileNotificationDetailsEnabled)
+        #expect(!settings.silentGoalsAndSwarmsEnabled)
+        #expect(settings.mobileNotificationTopic.isEmpty)
     }
 
     @Test
@@ -30,6 +35,12 @@ struct AppSupportTests {
         #expect(!settings.requiresBackgroundTaskMonitoring)
 
         settings.mainTaskSummaryEnabled = true
+        #expect(settings.requiresBackgroundTaskMonitoring)
+
+        settings.mainTaskSummaryEnabled = false
+        settings.mobileTaskNotificationsEnabled = true
+        settings.mobileNotificationDetailsEnabled = true
+        settings.silentGoalsAndSwarmsEnabled = true
         #expect(settings.requiresBackgroundTaskMonitoring)
 
         settings.taskMonitorEnabled = false
@@ -51,6 +62,10 @@ struct AppSupportTests {
         settings.taskMonitorEnabled = true
         settings.mainTaskSummaryEnabled = true
         settings.focusLoadEnabled = true
+        settings.taskNotificationsEnabled = true
+        settings.mobileTaskNotificationsEnabled = true
+        settings.mobileNotificationDetailsEnabled = true
+        settings.silentGoalsAndSwarmsEnabled = true
 
         #expect(settings.refreshIntervalSeconds == SettingsStore.minimumRefreshInterval)
         #expect(settings.deltaThresholdPercentagePoints == SettingsStore.maximumDeltaThreshold)
@@ -58,6 +73,11 @@ struct AppSupportTests {
         #expect(SettingsStore(defaults: defaults).taskMonitorEnabled == true)
         #expect(SettingsStore(defaults: defaults).mainTaskSummaryEnabled == true)
         #expect(SettingsStore(defaults: defaults).focusLoadEnabled == true)
+        #expect(SettingsStore(defaults: defaults).taskNotificationsEnabled == true)
+        #expect(SettingsStore(defaults: defaults).mobileTaskNotificationsEnabled == true)
+        #expect(SettingsStore(defaults: defaults).mobileNotificationDetailsEnabled == true)
+        #expect(SettingsStore(defaults: defaults).silentGoalsAndSwarmsEnabled == true)
+        #expect(!SettingsStore(defaults: defaults).mobileNotificationTopic.isEmpty)
         #expect(SettingsStore(defaults: defaults).refreshIntervalSeconds == SettingsStore.minimumRefreshInterval)
         #expect(SettingsStore(defaults: defaults).deltaThresholdPercentagePoints == SettingsStore.maximumDeltaThreshold)
     }
@@ -72,20 +92,57 @@ struct AppSupportTests {
         settings.taskMonitorEnabled.toggle()
         settings.mainTaskSummaryEnabled.toggle()
         settings.focusLoadEnabled.toggle()
+        settings.taskNotificationsEnabled.toggle()
+        settings.mobileTaskNotificationsEnabled.toggle()
+        settings.mobileNotificationDetailsEnabled.toggle()
+        settings.silentGoalsAndSwarmsEnabled.toggle()
         settings.refreshIntervalSeconds = 600
         settings.historyBasedForecastEnabled.toggle()
         settings.deltaThresholdPercentagePoints = 5
         settings.barColorScheme = .statusColor
 
-        #expect(changes.count == 8)
+        #expect(changes.count == 12)
         #expect(changes.contains { if case .codexExecutable = $0 { true } else { false } })
         #expect(changes.contains { if case .taskMonitor = $0 { true } else { false } })
         #expect(changes.contains { if case .mainTaskSummary = $0 { true } else { false } })
         #expect(changes.contains { if case .focusLoad = $0 { true } else { false } })
+        #expect(changes.contains { if case .taskNotifications = $0 { true } else { false } })
+        #expect(changes.contains { if case .mobileTaskNotifications = $0 { true } else { false } })
         #expect(changes.contains { if case .refreshInterval = $0 { true } else { false } })
         #expect(changes.contains { if case .forecastMode = $0 { true } else { false } })
         #expect(changes.contains { if case .paceThreshold = $0 { true } else { false } })
         #expect(changes.contains { if case .display = $0 { true } else { false } })
+    }
+
+    @Test
+    func mobileNotificationsGenerateAndPersistPrivateTopicOnlyWhenEnabled() {
+        let defaults = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+        let settings = SettingsStore(defaults: defaults)
+
+        settings.mobileTaskNotificationsEnabled = true
+        let topic = settings.mobileNotificationTopic
+
+        #expect(topic.hasPrefix("codex-pace-bar-"))
+        #expect(topic.count <= 64)
+        #expect(topic.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+        #expect(SettingsStore(defaults: defaults).mobileNotificationTopic == topic)
+
+        settings.regenerateMobileNotificationTopic()
+        #expect(settings.mobileNotificationTopic != topic)
+    }
+
+    @Test
+    func enabledLegacyMobileSettingRepairsMissingTopicOnLoad() {
+        let defaults = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+        defaults.set(true, forKey: "mobileTaskNotificationsEnabled")
+
+        let settings = SettingsStore(defaults: defaults)
+
+        #expect(settings.mobileTaskNotificationsEnabled)
+        #expect(settings.mobileNotificationTopic.hasPrefix("codex-pace-bar-"))
+        #expect(SettingsStore(defaults: defaults).mobileNotificationTopic == settings.mobileNotificationTopic)
     }
 
     @Test
