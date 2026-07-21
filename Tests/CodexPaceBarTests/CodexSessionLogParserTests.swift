@@ -74,6 +74,19 @@ struct CodexSessionLogParserTests {
     }
 
     @Test
+    func parsesAbortedTurnAsFinished() throws {
+        let completedAt = Date(timeIntervalSince1970: 1_784_373_261)
+
+        let aborted = parser.parseLine(#"{"timestamp":"2026-07-18T13:40:00Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted","completed_at":1784373261,"duration_ms":337328}}"#)
+
+        #expect(aborted == .turnStatusChanged(
+            turnID: "turn-1",
+            status: .cancelled,
+            occurredAt: completedAt
+        ))
+    }
+
+    @Test
     func ignoresUserContentAndUnknownEvents() throws {
         let userMessage = parser.parseLine(#"{"type":"event_msg","payload":{"type":"user_message","text":"secret prompt"}}"#)
         let unknown = parser.parseLine(#"{"type":"event_msg","payload":{"type":"future_event","text":"secret"}}"#)

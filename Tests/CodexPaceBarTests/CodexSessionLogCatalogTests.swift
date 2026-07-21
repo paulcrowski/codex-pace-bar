@@ -79,7 +79,7 @@ struct CodexSessionLogCatalogTests {
     }
 
     @Test
-    func skipsOversizedLogsBeforeAttachingWatchers() throws {
+    func keepsOversizedRecentLogsForBoundedTailReading() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexPaceBarTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -91,7 +91,8 @@ struct CodexSessionLogCatalogTests {
         let files = try CodexSessionLogCatalog(rootURL: directory)
             .recentLogFiles(now: Date(), maximumAge: 60, maximumFileSize: 64)
 
-        #expect(files.isEmpty)
+        #expect(files.count == 1)
+        #expect(files.first?.resolvingSymlinksInPath() == oversized.resolvingSymlinksInPath())
     }
 
     private func setModificationDate(_ date: Date, for url: URL) throws {

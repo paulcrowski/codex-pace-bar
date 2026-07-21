@@ -43,6 +43,11 @@ public struct CodexSessionLogCatalog: Sendable {
             return []
         }
 
+        // Keep the size label for API compatibility. CodexSessionLogReader bounds
+        // the actual startup read to its tail, so excluding a recently active
+        // file here would drop its later completion/abort events once the log grows.
+        _ = maximumFileSize
+
         let cutoff = now.addingTimeInterval(-maximumAge)
         var files: [(url: URL, modifiedAt: Date)] = []
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
@@ -57,8 +62,7 @@ public struct CodexSessionLogCatalog: Sendable {
                 let values = try url.resourceValues(forKeys: keys)
                 guard values.isRegularFile == true,
                       let modifiedAt = values.contentModificationDate,
-                      modifiedAt >= cutoff,
-                      UInt64(values.fileSize ?? 0) <= maximumFileSize
+                      modifiedAt >= cutoff
                 else { continue }
                 files.append((url, modifiedAt))
             }
