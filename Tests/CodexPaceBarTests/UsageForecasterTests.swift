@@ -91,6 +91,23 @@ struct UsageForecasterTests {
     }
 
     @Test
+    func recentPaceForecastSurvivesUsageCorrection() throws {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let resetAt = now.addingTimeInterval(20 * 60 * 60)
+        let samples = [
+            sample(at: now.addingTimeInterval(-60 * 60), used: 40, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-30 * 60), used: 45, resetAt: resetAt),
+            sample(at: now.addingTimeInterval(-15 * 60), used: 43, resetAt: resetAt),
+            sample(at: now, used: 50, resetAt: resetAt)
+        ]
+
+        let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
+
+        #expect(forecast.ratePercentagePointsPerHour == 10)
+        #expect(forecast.hoursUntilExhaustion(at: now) == 5)
+    }
+
+    @Test
     func preResetSamplesDoNotContributeToPostResetForecast() {
         let oldReset = Date(timeIntervalSince1970: 100_000)
         let now = oldReset.addingTimeInterval(60)

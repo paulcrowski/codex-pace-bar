@@ -109,7 +109,7 @@ struct UsagePatternForecasterTests {
     }
 
     @Test
-    func usageAfterManualResetStillContributesToPattern() throws {
+    func usageAfterCorrectionStillContributesToPattern() throws {
         let now = date("2026-07-13T09:00:00Z")
         let resetAt = now.addingTimeInterval(7 * hour)
         var samples: [UsageSample] = []
