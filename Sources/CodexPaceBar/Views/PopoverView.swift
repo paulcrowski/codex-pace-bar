@@ -305,6 +305,7 @@ struct PopoverView: View {
                     )
                     .foregroundStyle(by: .value("Series", "Forecast"))
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
+                    .interpolationMethod(.linear)
                 }
 
                 if let latest = history.currentSamples.last {
@@ -362,17 +363,17 @@ struct PopoverView: View {
     }
 
     private var forecastChartPoints: [UsageChartPoint] {
-        guard let latest = history.currentSamples.last, let forecast = model.forecast else {
+        guard let forecast = model.forecast else {
             return []
         }
 
-        let end = min(forecast.exhaustionAt, forecast.resetAt)
-        let forecastHours = max(0, end.timeIntervalSince(latest.timestamp) / 3600)
-        let endValue = min(100, latest.usedPercent + forecast.ratePercentagePointsPerHour * forecastHours)
-        return [
-            UsageChartPoint(id: "forecast-start", date: latest.timestamp, value: latest.usedPercent),
-            UsageChartPoint(id: "forecast-end", date: end, value: endValue)
-        ]
+        return forecast.projection.enumerated().map { index, point in
+            UsageChartPoint(
+                id: "forecast-\(index)",
+                date: point.timestamp,
+                value: point.usedPercent
+            )
+        }
     }
 
     private var largeBarImage: NSImage {

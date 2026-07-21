@@ -70,9 +70,22 @@ public enum UsageForecaster {
             return nil
         }
 
+        let exhaustionAt = latest.timestamp.addingTimeInterval(hoursUntilExhaustion * 3600)
+        let projectionEnd = min(exhaustionAt, latest.resetAt)
+        let projectionHours = projectionEnd.timeIntervalSince(latest.timestamp) / 3600
+        var projection = [
+            UsageForecastPoint(timestamp: latest.timestamp, usedPercent: latest.usedPercent)
+        ]
+        if projectionEnd > latest.timestamp {
+            projection.append(UsageForecastPoint(
+                timestamp: projectionEnd,
+                usedPercent: latest.usedPercent + rate * projectionHours
+            ))
+        }
+
         return UsageForecast(
-            ratePercentagePointsPerHour: rate,
-            exhaustionAt: latest.timestamp.addingTimeInterval(hoursUntilExhaustion * 3600),
+            projection: projection,
+            exhaustionAt: exhaustionAt,
             resetAt: latest.resetAt
         )
     }

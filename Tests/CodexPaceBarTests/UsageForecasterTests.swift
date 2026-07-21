@@ -16,7 +16,10 @@ struct UsageForecasterTests {
 
         let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
 
-        #expect(forecast.ratePercentagePointsPerHour == 5)
+        #expect(forecast.projection == [
+            UsageForecastPoint(timestamp: now, usedPercent: 50),
+            UsageForecastPoint(timestamp: now.addingTimeInterval(10 * 60 * 60), usedPercent: 100)
+        ])
         #expect(forecast.hoursUntilExhaustion(at: now) == 10)
         #expect(forecast.willRunOutBeforeReset)
     }
@@ -33,6 +36,7 @@ struct UsageForecasterTests {
 
         let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
 
+        #expect(forecast.projection.last == UsageForecastPoint(timestamp: resetAt, usedPercent: 60))
         #expect(!forecast.willRunOutBeforeReset)
     }
 
@@ -86,7 +90,7 @@ struct UsageForecasterTests {
 
         let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
 
-        #expect(forecast.ratePercentagePointsPerHour == 10)
+        #expect(forecast.exhaustionAt == now.addingTimeInterval(5 * 60 * 60))
         #expect(forecast.resetAt == resetAt.addingTimeInterval(52))
     }
 
@@ -103,7 +107,7 @@ struct UsageForecasterTests {
 
         let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
 
-        #expect(forecast.ratePercentagePointsPerHour == 10)
+        #expect(forecast.projection.last?.usedPercent == 100)
         #expect(forecast.hoursUntilExhaustion(at: now) == 5)
     }
 
@@ -135,7 +139,7 @@ struct UsageForecasterTests {
 
         let forecast = try #require(UsageForecaster.forecast(samples: samples, now: now, mode: .recentPace))
 
-        #expect(forecast.ratePercentagePointsPerHour == 2)
+        #expect(forecast.exhaustionAt == now.addingTimeInterval(47.5 * 60 * 60))
         #expect(forecast.resetAt == newReset)
     }
 

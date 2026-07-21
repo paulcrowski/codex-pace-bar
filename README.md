@@ -45,7 +45,7 @@ If your Codex CLI is installed somewhere else, set the exact executable path in 
 - A popover with used, ideal, remaining, reset time, and hours until reset.
 - If usage is above pace, the popover shows how long to wait for the ideal pace to catch up.
 - A chart of usage percentage during the current weekly window.
-- A run-out forecast that learns recency-weighted weekday and hourly usage patterns from the last 30 days.
+- A run-out forecast that learns recency-weighted hourly usage patterns for workdays and weekends from the last 30 days.
 - A recent-pace forecast while the history-based model is still learning.
 
 ![Codex Pace Bar menu bar item](docs/screenshots/menu-bar.png)
@@ -69,7 +69,7 @@ Settings are intentionally small:
 Settings are stored in `UserDefaults`.
 Usage history is stored locally in Application Support for 30 days. Reset metadata never deletes it; the chart derives the current continuous usage series from the retained archive. A validated rolling backup protects the previous file state.
 
-History-based forecasting groups observed percentage-point changes by local weekday and hour. Recent weeks receive more weight, token reset transitions are excluded, and gaps longer than 90 minutes are not assigned to a specific working period. The learned model requires at least seven days of history, 24 hours of usable observations, and one percentage point of observed usage. Until then, the app falls back to the recent-pace forecast, which requires three samples spanning 30 minutes and one percentage point of change.
+History-based forecasting groups observed percentage-point changes by workday or weekend and local hour. Recent weeks receive more weight, token reset transitions are excluded, and gaps longer than 90 minutes are not assigned to a specific working period. The chart plots the resulting hourly projection directly, so expected inactive periods appear as plateaus instead of being averaged into a straight line. The learned model requires at least seven days of history, 24 hours of usable observations, and one percentage point of observed usage. Until then, the app falls back to the recent-pace forecast, which requires three samples spanning 30 minutes and one percentage point of change.
 
 ## Build And Run
 

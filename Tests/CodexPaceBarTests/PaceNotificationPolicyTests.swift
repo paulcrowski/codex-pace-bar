@@ -74,7 +74,7 @@ struct PaceNotificationPolicyTests {
         let now = Date(timeIntervalSince1970: 1_000)
         let resetAt = now.addingTimeInterval(10 * 60 * 60)
         let forecast = UsageForecast(
-            ratePercentagePointsPerHour: 5,
+            projection: [UsageForecastPoint(timestamp: now, usedPercent: 50)],
             exhaustionAt: now.addingTimeInterval(5 * 60 * 60),
             resetAt: resetAt
         )
@@ -92,7 +92,7 @@ struct PaceNotificationPolicyTests {
         let now = Date(timeIntervalSince1970: 1_000)
         let resetAt = now.addingTimeInterval(5 * 60 * 60)
         let forecast = UsageForecast(
-            ratePercentagePointsPerHour: 1,
+            projection: [UsageForecastPoint(timestamp: now, usedPercent: 50)],
             exhaustionAt: now.addingTimeInterval(10 * 60 * 60),
             resetAt: resetAt
         )

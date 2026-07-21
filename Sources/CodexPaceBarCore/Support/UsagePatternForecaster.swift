@@ -107,16 +107,17 @@ enum UsagePatternForecaster {
         calendar: Calendar
     ) -> UsageForecast {
         let initialRemaining = max(0, 100 - usedPercent)
+        var projection = [UsageForecastPoint(timestamp: now, usedPercent: usedPercent)]
         guard initialRemaining > 0 else {
             return UsageForecast(
-                ratePercentagePointsPerHour: 0,
+                projection: projection,
                 exhaustionAt: now,
                 resetAt: resetAt
             )
         }
 
         var remaining = initialRemaining
-        var projectedUsage = 0.0
+        var projectedUsedPercent = usedPercent
         var cursor = now
 
         while cursor < resetAt {
@@ -130,33 +131,26 @@ enum UsagePatternForecaster {
 
             if rate > 0, segmentUsage >= remaining {
                 let exhaustionAt = cursor.addingTimeInterval(remaining / rate * 3600)
-                let elapsedHours = exhaustionAt.timeIntervalSince(now) / 3600
-                let effectiveRate = elapsedHours > 0 ? initialRemaining / elapsedHours : rate
+                projection.append(UsageForecastPoint(timestamp: exhaustionAt, usedPercent: 100))
                 return UsageForecast(
-                    ratePercentagePointsPerHour: effectiveRate,
+                    projection: projection,
                     exhaustionAt: exhaustionAt,
                     resetAt: resetAt
                 )
             }
 
             remaining -= segmentUsage
-            projectedUsage += segmentUsage
+            projectedUsedPercent += segmentUsage
+            projection.append(UsageForecastPoint(
+                timestamp: segmentEnd,
+                usedPercent: projectedUsedPercent
+            ))
             cursor = segmentEnd
         }
 
-        guard projectedUsage > 0 else {
-            return UsageForecast(
-                ratePercentagePointsPerHour: 0,
-                exhaustionAt: .distantFuture,
-                resetAt: resetAt
-            )
-        }
-
-        let hoursToReset = resetAt.timeIntervalSince(now) / 3600
-        let effectiveRate = projectedUsage / hoursToReset
         return UsageForecast(
-            ratePercentagePointsPerHour: effectiveRate,
-            exhaustionAt: now.addingTimeInterval(initialRemaining / effectiveRate * 3600),
+            projection: projection,
+            exhaustionAt: .distantFuture,
             resetAt: resetAt
         )
     }
@@ -176,11 +170,11 @@ enum UsagePatternForecaster {
     }
 
     private struct HourBucket: Hashable {
-        let weekday: Int
+        let isWeekend: Bool
         let hour: Int
 
         init(date: Date, calendar: Calendar) {
-            weekday = calendar.component(.weekday, from: date)
+            isWeekend = calendar.isDateInWeekend(date)
             hour = calendar.component(.hour, from: date)
         }
     }
