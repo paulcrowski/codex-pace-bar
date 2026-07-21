@@ -105,6 +105,19 @@ final class TaskMonitorViewModel {
         estimator.estimate(for: task, now: now, history: tasks)
     }
 
+    func completionForecast(
+        for task: CodexTaskActivity,
+        within horizon: TimeInterval,
+        now: Date
+    ) -> CodexTaskCompletionForecast? {
+        estimator.completionForecast(
+            for: task,
+            within: horizon,
+            now: now,
+            history: tasks
+        )
+    }
+
     func typicalDuration(at now: Date) -> CodexTaskDurationDistribution? {
         estimator.distribution(history: tasks, now: now)
     }

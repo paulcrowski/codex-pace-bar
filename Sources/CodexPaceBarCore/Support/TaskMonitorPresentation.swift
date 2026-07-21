@@ -138,3 +138,12 @@ public struct CodexTaskSummaryPresenter: Sendable {
         return "Updated \(seconds / 60) min ago"
     }
 }
+
+public enum CodexTaskCompletionForecastPresenter {
+    public static func text(_ forecast: CodexTaskCompletionForecast) -> String {
+        let minutes = max(0, Int((forecast.horizon / 60).rounded()))
+        let probability = min(max(forecast.probability, 0), 1)
+        let percentage = Int((probability * 100).rounded())
+        return "\(minutes) min completion chance: \(percentage)%"
+    }
+}

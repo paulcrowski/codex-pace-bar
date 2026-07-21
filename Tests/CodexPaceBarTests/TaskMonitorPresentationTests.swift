@@ -4,6 +4,21 @@ import Testing
 
 struct TaskMonitorPresentationTests {
     @Test
+    func formatsThirtyMinuteCompletionChanceWithoutFalsePrecision() {
+        let forecast = CodexTaskCompletionForecast(
+            horizon: 30 * 60,
+            probability: 13.0 / 14.0,
+            sampleCount: 12,
+            scope: .exact
+        )
+
+        #expect(
+            CodexTaskCompletionForecastPresenter.text(forecast)
+                == "30 min completion chance: 93%"
+        )
+    }
+
+    @Test
     func distinguishesLegacyRunningTurnFromQueuedPlaceholder() {
         let now = Date(timeIntervalSince1970: 1_784_373_500)
         let legacyRunning = CodexTaskActivity(

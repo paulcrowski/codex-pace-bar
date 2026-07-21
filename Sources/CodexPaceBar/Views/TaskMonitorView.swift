@@ -43,6 +43,7 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: nil,
+                                        completionForecast: nil,
                                         now: context.date,
                                         canNavigate: model.canNavigate(to: task),
                                         onNavigate: { model.navigate(to: task) }
@@ -57,6 +58,11 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: model.estimate(for: task, now: context.date),
+                                        completionForecast: model.completionForecast(
+                                            for: task,
+                                            within: 30 * 60,
+                                            now: context.date
+                                        ),
                                         now: context.date,
                                         canNavigate: model.canNavigate(to: task),
                                         onNavigate: { model.navigate(to: task) }
@@ -83,6 +89,7 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: nil,
+                                        completionForecast: nil,
                                         now: context.date,
                                         canNavigate: model.canNavigate(to: task),
                                         onNavigate: { model.navigate(to: task) }
@@ -290,6 +297,7 @@ private struct DailyCheckIn: View {
 private struct TaskMonitorRow: View {
     let task: CodexTaskActivity
     let estimate: CodexTaskDurationEstimate?
+    let completionForecast: CodexTaskCompletionForecast?
     let now: Date
     let canNavigate: Bool
     let onNavigate: () -> Void
@@ -312,6 +320,11 @@ private struct TaskMonitorRow: View {
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+                if let completionForecast {
+                    Text(CodexTaskCompletionForecastPresenter.text(completionForecast))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.blue)
+                }
             }
             if canNavigate {
                 Button(action: onNavigate) { Image(systemName: "arrow.up.forward.app") }
