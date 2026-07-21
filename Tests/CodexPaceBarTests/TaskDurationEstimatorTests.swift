@@ -49,7 +49,7 @@ struct TaskDurationEstimatorTests {
     }
 
     @Test
-    func estimatesRemainingP50AndP80ForSimilarLongerTasks() {
+    func estimatesRemainingP50AndCalibratedUpperBoundForSimilarLongerTasks() {
         let now = Date(timeIntervalSince1970: 1_784_373_500)
         let current = activity(
             sessionID: "current",
@@ -76,8 +76,128 @@ struct TaskDurationEstimatorTests {
 
         #expect(estimate?.sampleCount == 12)
         #expect(estimate?.medianRemaining == 930)
-        #expect(estimate?.safeRemaining == 1_140)
+        #expect(estimate?.safeRemaining == 1_200)
         #expect(estimate?.confidence == .learned)
+    }
+
+    @Test
+    func estimatesSmoothedCompletionProbabilityWithinSelectedHorizon() throws {
+        let now = Date(timeIntervalSince1970: 1_784_373_500)
+        let current = activity(
+            sessionID: "current",
+            turnID: "current-turn",
+            startedAt: now.addingTimeInterval(-600),
+            duration: nil
+        )
+        let history = (20...31).map { minutes -> CodexTaskActivity in
+            let duration = Double(minutes * 60)
+            return activity(
+                sessionID: "history-\(minutes)",
+                turnID: "turn-\(minutes)",
+                startedAt: now.addingTimeInterval(-duration),
+                duration: duration,
+                status: .completed
+            )
+        }
+
+        let forecast = try #require(CodexTaskDurationEstimator().completionForecast(
+            for: current,
+            within: 15 * 60,
+            now: now,
+            history: history
+        ))
+
+        #expect(forecast.horizon == 15 * 60)
+        #expect(forecast.probability == 0.5)
+        #expect(forecast.sampleCount == 12)
+        #expect(forecast.scope == .exact)
+
+        let broadForecast = try #require(CodexTaskDurationEstimator().completionForecast(
+            for: current,
+            within: 30 * 60,
+            now: now,
+            history: history
+        ))
+        #expect(broadForecast.probability == 13.0 / 14.0)
+    }
+
+    @Test
+    func completionForecastRejectsInvalidHorizonAndSparseHistory() {
+        let now = Date(timeIntervalSince1970: 1_784_373_500)
+        let current = activity(
+            sessionID: "current",
+            turnID: "current-turn",
+            startedAt: now.addingTimeInterval(-60),
+            duration: nil
+        )
+        let history = (0..<3).map { index in
+            activity(
+                sessionID: "history-\(index)",
+                turnID: "turn-\(index)",
+                startedAt: now.addingTimeInterval(-1_200),
+                duration: 1_200,
+                status: .completed
+            )
+        }
+        let estimator = CodexTaskDurationEstimator(minimumSamples: 10)
+
+        #expect(estimator.completionForecast(
+            for: current,
+            within: -1,
+            now: now,
+            history: history
+        ) == nil)
+        #expect(estimator.completionForecast(
+            for: current,
+            within: 30 * 60,
+            now: now,
+            history: history
+        ) == nil)
+    }
+
+    @Test
+    func excludesCompletedTasksOutsideRetainedHistoryWindow() throws {
+        let now = Date(timeIntervalSince1970: 1_784_373_500)
+        let current = activity(
+            sessionID: "current",
+            turnID: "current-turn",
+            startedAt: now.addingTimeInterval(-60),
+            duration: nil
+        )
+        let recent = (0..<9).map { index in
+            activity(
+                sessionID: "recent-\(index)",
+                turnID: "recent-\(index)",
+                startedAt: now.addingTimeInterval(-1_200 - Double(index)),
+                duration: 1_200,
+                status: .completed
+            )
+        }
+        let old = (0..<10).map { index in
+            activity(
+                sessionID: "old-\(index)",
+                turnID: "old-\(index)",
+                startedAt: now.addingTimeInterval(-31 * 24 * 60 * 60 - 1_200 - Double(index)),
+                duration: 1_200,
+                status: .completed
+            )
+        }
+        let estimator = CodexTaskDurationEstimator(minimumSamples: 10)
+
+        let estimate = try #require(estimator.estimate(
+            for: current,
+            now: now,
+            history: recent + old
+        ))
+
+        #expect(estimate.sampleCount == 9)
+        #expect(estimate.confidence == .learning)
+        #expect(estimator.completionForecast(
+            for: current,
+            within: 30 * 60,
+            now: now,
+            history: recent + old
+        ) == nil)
     }
 
     @Test

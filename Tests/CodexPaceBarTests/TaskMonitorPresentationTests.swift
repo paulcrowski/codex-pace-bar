@@ -118,7 +118,7 @@ struct TaskMonitorPresentationTests {
         #expect(presentation.title == "Working · 1 active")
         #expect(presentation.projectName == "project")
         #expect(presentation.elapsedText == "10 min")
-        #expect(presentation.estimateText == "ETA 16 min–19 min")
+        #expect(presentation.estimateText == "ETA 16 min–20 min")
     }
 
     @Test
