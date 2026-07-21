@@ -1,4 +1,5 @@
 import CodexPaceBarCore
+import CodexPaceBarAppSupport
 import AppKit
 import Charts
 import SwiftUI
