@@ -72,7 +72,25 @@ public actor TaskActivityStore {
         sample_count INTEGER NOT NULL,
         scope TEXT NOT NULL,
         actual_duration REAL,
-        actual_status TEXT
+        actual_status TEXT,
+        typical_total REAL,
+        upper_total REAL,
+        safe_away_remaining REAL,
+        model TEXT NOT NULL DEFAULT 'baseline'
+    );
+    CREATE TABLE IF NOT EXISTS task_initial_plan (
+        task_key TEXT PRIMARY KEY,
+        observed_at REAL NOT NULL,
+        step_count INTEGER NOT NULL,
+        work_unit_count INTEGER NOT NULL,
+        verification_count INTEGER NOT NULL,
+        build_count INTEGER NOT NULL,
+        runtime_check_count INTEGER NOT NULL,
+        repository_count INTEGER NOT NULL,
+        planned_parallelism INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        complexity TEXT NOT NULL,
+        classifier_version INTEGER NOT NULL
     );
     """
 
@@ -84,6 +102,7 @@ public actor TaskActivityStore {
     private var activities: [String: CodexTaskActivity]
     private var goalsByID: [String: CodexGoalActivity]
     private var swarmsByID: [String: CodexSwarmActivity]
+    private var plansByTaskID: [String: CodexTaskPlanSnapshot]
 
     public init(
         databaseURL: URL,
@@ -131,10 +150,12 @@ public actor TaskActivityStore {
                 self.activities = result.activities
                 self.goalsByID = try Self.loadGoals(from: database)
                 self.swarmsByID = try Self.loadSwarms(from: database)
+                self.plansByTaskID = try Self.loadTaskPlans(from: database)
             } else {
                 self.activities = [:]
                 self.goalsByID = [:]
                 self.swarmsByID = [:]
+                self.plansByTaskID = [:]
             }
             self.sessionID = initialSessionID
         } catch {
@@ -247,12 +268,32 @@ public actor TaskActivityStore {
                 CodexTaskStatusEvent(sessionID: activity.sessionID, turnID: turnID, status: .completed, occurredAt: completedAt),
                 in: database.pointer
             )
+            try Self.markForecasts(
+                entityType: .task,
+                entityID: activity.id,
+                actualDuration: max(0, duration - activity.waitingDuration),
+                actualStatus: activity.status.rawValue,
+                in: database.pointer
+            )
 
             if var swarm = swarmsByID[activity.id], swarm.completedAt == nil {
                 swarm.completedAt = completedAt
                 swarmsByID[swarm.id] = swarm
                 swarmToPersist = swarm
             }
+
+        case let .turnPlanObserved(turnID, observedAt, features):
+            let resolvedTurnID = turnID ?? currentTurnID
+            guard let resolvedTurnID else { break }
+            let taskID = taskKey(for: resolvedTurnID)
+            guard plansByTaskID[taskID] == nil else { break }
+            let snapshot = CodexTaskPlanSnapshot(
+                taskID: taskID,
+                observedAt: observedAt,
+                features: features
+            )
+            plansByTaskID[taskID] = snapshot
+            try Self.upsert(snapshot, in: database.pointer)
 
         case let .goalUpdated(goal):
             var merged = goalsByID[goal.id] ?? goal
@@ -341,18 +382,27 @@ public actor TaskActivityStore {
         return swarmsByID.values.sorted { $0.firstSpawnedAt > $1.firstSpawnedAt }
     }
 
+    public func taskPlans() throws -> [CodexTaskPlanSnapshot] {
+        plansByTaskID = try Self.loadTaskPlans(from: database.pointer)
+        return plansByTaskID.values.sorted { $0.observedAt > $1.observedAt }
+    }
+
     public func recordForecast(_ observation: CodexForecastObservation) throws {
         let statement = try Self.prepare(
             """
-            INSERT INTO forecast_observation (observation_id, entity_type, entity_id, observed_at, elapsed_duration, median_remaining, safe_remaining, probability, horizon, sample_count, scope)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO forecast_observation (observation_id, entity_type, entity_id, observed_at, elapsed_duration, median_remaining, safe_remaining, probability, horizon, sample_count, scope, typical_total, upper_total, safe_away_remaining, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(observation_id) DO UPDATE SET
                 median_remaining = excluded.median_remaining,
                 safe_remaining = excluded.safe_remaining,
                 probability = excluded.probability,
                 horizon = excluded.horizon,
                 sample_count = excluded.sample_count,
-                scope = excluded.scope;
+                scope = excluded.scope,
+                typical_total = excluded.typical_total,
+                upper_total = excluded.upper_total,
+                safe_away_remaining = excluded.safe_away_remaining,
+                model = excluded.model;
             """,
             on: database.pointer
         )
@@ -368,6 +418,10 @@ public actor TaskActivityStore {
         try Self.bind(observation.horizon, to: statement, index: 9)
         try Self.bind(Double(observation.sampleCount), to: statement, index: 10)
         try Self.bind(observation.scope.rawValue, to: statement, index: 11)
+        try Self.bind(observation.typicalTotal, to: statement, index: 12)
+        try Self.bind(observation.upperTotal, to: statement, index: 13)
+        try Self.bind(observation.safeAwayRemaining, to: statement, index: 14)
+        try Self.bind(observation.model.rawValue, to: statement, index: 15)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw TaskActivityStoreError.queryFailed(Self.errorMessage(database.pointer))
         }
@@ -399,12 +453,13 @@ public actor TaskActivityStore {
 
     public func clearHistory() throws {
         try Self.execute(
-            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; DELETE FROM goal_activity; DELETE FROM swarm_activity; DELETE FROM forecast_observation; PRAGMA wal_checkpoint(TRUNCATE);",
+            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; DELETE FROM goal_activity; DELETE FROM swarm_activity; DELETE FROM forecast_observation; DELETE FROM task_initial_plan; PRAGMA wal_checkpoint(TRUNCATE);",
             on: database.pointer
         )
         activities.removeAll()
         goalsByID.removeAll()
         swarmsByID.removeAll()
+        plansByTaskID.removeAll()
         contexts.removeAll()
         currentTurnID = nil
     }
@@ -551,6 +606,7 @@ public actor TaskActivityStore {
             WHERE COALESCE(completed_at, first_spawned_at, 0) < \(taskCutoff)
               AND completed_at IS NOT NULL;
             DELETE FROM forecast_observation WHERE observed_at < \(taskCutoff);
+            DELETE FROM task_initial_plan WHERE observed_at < \(taskCutoff);
             """,
             on: database
         )
@@ -788,6 +844,69 @@ public actor TaskActivityStore {
         }
     }
 
+    private static func upsert(_ snapshot: CodexTaskPlanSnapshot, in database: OpaquePointer) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO task_initial_plan (task_key, observed_at, step_count, work_unit_count, verification_count, build_count, runtime_check_count, repository_count, planned_parallelism, category, complexity, classifier_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_key) DO NOTHING;
+            """,
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(snapshot.taskID, to: statement, index: 1)
+        try bind(snapshot.observedAt.timeIntervalSince1970, to: statement, index: 2)
+        try bind(Double(snapshot.features.stepCount), to: statement, index: 3)
+        try bind(Double(snapshot.features.workUnitCount), to: statement, index: 4)
+        try bind(Double(snapshot.features.verificationCount), to: statement, index: 5)
+        try bind(Double(snapshot.features.buildCount), to: statement, index: 6)
+        try bind(Double(snapshot.features.runtimeCheckCount), to: statement, index: 7)
+        try bind(Double(snapshot.features.repositoryCount), to: statement, index: 8)
+        try bind(Double(snapshot.features.plannedParallelism), to: statement, index: 9)
+        try bind(snapshot.features.category.rawValue, to: statement, index: 10)
+        try bind(snapshot.features.complexity.rawValue, to: statement, index: 11)
+        try bind(Double(snapshot.features.classifierVersion), to: statement, index: 12)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(Self.errorMessage(database))
+        }
+    }
+
+    private static func loadTaskPlans(from database: OpaquePointer) throws -> [String: CodexTaskPlanSnapshot] {
+        let statement = try prepare(
+            "SELECT task_key, observed_at, step_count, work_unit_count, verification_count, build_count, runtime_check_count, repository_count, planned_parallelism, category, complexity, classifier_version FROM task_initial_plan ORDER BY observed_at DESC LIMIT 5000;",
+            on: database
+        )
+        defer { sqlite3_finalize(statement) }
+        var snapshots: [String: CodexTaskPlanSnapshot] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let taskID = stringColumn(statement, index: 0),
+                  let observedAt = dateColumn(statement, index: 1),
+                  let categoryRaw = stringColumn(statement, index: 9),
+                  let category = CodexTaskCategory(rawValue: categoryRaw),
+                  let complexityRaw = stringColumn(statement, index: 10),
+                  let complexity = CodexTaskComplexity(rawValue: complexityRaw)
+            else { continue }
+            let features = CodexTaskPlanFeatures(
+                stepCount: Int(doubleColumn(statement, index: 2) ?? 0),
+                workUnitCount: Int(doubleColumn(statement, index: 3) ?? 0),
+                verificationCount: Int(doubleColumn(statement, index: 4) ?? 0),
+                buildCount: Int(doubleColumn(statement, index: 5) ?? 0),
+                runtimeCheckCount: Int(doubleColumn(statement, index: 6) ?? 0),
+                repositoryCount: Int(doubleColumn(statement, index: 7) ?? 0),
+                plannedParallelism: Int(doubleColumn(statement, index: 8) ?? 0),
+                category: category,
+                complexity: complexity,
+                classifierVersion: Int(doubleColumn(statement, index: 11) ?? 1)
+            )
+            snapshots[taskID] = CodexTaskPlanSnapshot(
+                taskID: taskID,
+                observedAt: observedAt,
+                features: features
+            )
+        }
+        return snapshots
+    }
+
     private static func loadGoals(from database: OpaquePointer) throws -> [String: CodexGoalActivity] {
         let statement = try prepare(
             "SELECT goal_id, thread_id, created_at, updated_at, status, active_duration, working_directory FROM goal_activity ORDER BY updated_at DESC;",
@@ -853,7 +972,8 @@ public actor TaskActivityStore {
             """
             SELECT observation_id, entity_type, entity_id, observed_at, elapsed_duration,
                    median_remaining, safe_remaining, probability, horizon, sample_count,
-                   scope, actual_duration, actual_status
+                   scope, actual_duration, actual_status, typical_total, upper_total,
+                   safe_away_remaining, model
             FROM forecast_observation
             WHERE (? IS NULL OR observed_at >= ?)
             ORDER BY observed_at ASC;
@@ -889,6 +1009,10 @@ public actor TaskActivityStore {
                 horizon: doubleColumn(statement, index: 8),
                 sampleCount: Int(sampleCount),
                 scope: scope,
+                typicalTotal: doubleColumn(statement, index: 13),
+                upperTotal: doubleColumn(statement, index: 14),
+                safeAwayRemaining: doubleColumn(statement, index: 15),
+                model: stringColumn(statement, index: 16).flatMap(CodexTaskForecastModel.init(rawValue:)) ?? .baseline,
                 actualDuration: doubleColumn(statement, index: 11),
                 actualStatus: stringColumn(statement, index: 12)
             ))
@@ -1004,6 +1128,16 @@ public actor TaskActivityStore {
         let existing = try tableColumns("task_activity", on: database)
         for (name, definition) in columns where !existing.contains(name) {
             try execute("ALTER TABLE task_activity ADD COLUMN \(name) \(definition);", on: database)
+        }
+        let forecastColumns: [(String, String)] = [
+            ("typical_total", "REAL"),
+            ("upper_total", "REAL"),
+            ("safe_away_remaining", "REAL"),
+            ("model", "TEXT NOT NULL DEFAULT 'baseline'")
+        ]
+        let existingForecast = try tableColumns("forecast_observation", on: database)
+        for (name, definition) in forecastColumns where !existingForecast.contains(name) {
+            try execute("ALTER TABLE forecast_observation ADD COLUMN \(name) \(definition);", on: database)
         }
     }
 

@@ -143,6 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reconcileTaskMonitorRuntime()
         case .focusLoad:
             taskMonitorViewModel?.focusLoadEnabled = settings.focusLoadEnabled
+        case .forecastMode:
+            taskMonitorViewModel?.planAwareEstimatesEnabled = settings.planAwareEstimatesEnabled
+            taskMonitorViewModel?.reload()
         case .display:
             statusBarController?.refreshIcon()
         case .taskNotifications:
@@ -151,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             taskNotificationController.resetMobileBaseline()
             reconcileTaskMonitorRuntime()
             taskMonitorViewModel?.reload()
-        case .codexExecutable, .forecastMode, .paceThreshold:
+        case .codexExecutable, .paceThreshold:
             break
         }
         coordinator.settingsDidChange(change)
@@ -227,7 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             taskMonitorCoordinator = monitor
             let model = TaskMonitorViewModel(
                 coordinator: monitor,
-                focusLoadEnabled: settings.focusLoadEnabled
+                focusLoadEnabled: settings.focusLoadEnabled,
+                planAwareEstimatesEnabled: settings.planAwareEstimatesEnabled
             )
             model.onActivityReloaded = { [weak self] tasks, goals, swarms in
                 guard let self else { return }

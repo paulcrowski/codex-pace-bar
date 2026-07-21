@@ -24,8 +24,126 @@ public enum CodexSessionLogEvent: Equatable, Sendable {
         duration: TimeInterval,
         timeToFirstToken: TimeInterval?
     )
+    case turnPlanObserved(
+        turnID: String?,
+        observedAt: Date,
+        features: CodexTaskPlanFeatures
+    )
     case goalUpdated(CodexGoalActivity)
     case swarmAgentSpawned(occurredAt: Date)
+}
+
+public enum CodexTaskCategory: String, Codable, Sendable {
+    case question
+    case smallFix = "small_fix"
+    case feature
+    case audit
+    case research
+    case dataAnalysis = "data_analysis"
+    case release
+    case unknown
+}
+
+public enum CodexTaskComplexity: String, Codable, Sendable {
+    case simple
+    case medium
+    case complex
+    case veryComplex = "very_complex"
+    case unknown
+}
+
+public struct CodexTaskPlanFeatures: Codable, Equatable, Sendable {
+    public let stepCount: Int
+    public let workUnitCount: Int
+    public let verificationCount: Int
+    public let buildCount: Int
+    public let runtimeCheckCount: Int
+    public let repositoryCount: Int
+    public let plannedParallelism: Int
+    public let category: CodexTaskCategory
+    public let complexity: CodexTaskComplexity
+    public let classifierVersion: Int
+
+    public init(
+        stepCount: Int,
+        workUnitCount: Int,
+        verificationCount: Int,
+        buildCount: Int,
+        runtimeCheckCount: Int,
+        repositoryCount: Int,
+        plannedParallelism: Int,
+        category: CodexTaskCategory,
+        complexity: CodexTaskComplexity,
+        classifierVersion: Int = 1
+    ) {
+        self.stepCount = max(0, stepCount)
+        self.workUnitCount = max(0, workUnitCount)
+        self.verificationCount = max(0, verificationCount)
+        self.buildCount = max(0, buildCount)
+        self.runtimeCheckCount = max(0, runtimeCheckCount)
+        self.repositoryCount = max(0, repositoryCount)
+        self.plannedParallelism = max(0, plannedParallelism)
+        self.category = category
+        self.complexity = complexity
+        self.classifierVersion = classifierVersion
+    }
+
+    public var summary: String {
+        let complexityText = complexity.rawValue.replacingOccurrences(of: "_", with: " ")
+        return "\(complexityText) \(stepCount)-step plan"
+    }
+}
+
+public struct CodexTaskPlanSnapshot: Codable, Equatable, Identifiable, Sendable {
+    public let taskID: String
+    public let observedAt: Date
+    public let features: CodexTaskPlanFeatures
+
+    public var id: String { taskID }
+
+    public init(taskID: String, observedAt: Date, features: CodexTaskPlanFeatures) {
+        self.taskID = taskID
+        self.observedAt = observedAt
+        self.features = features
+    }
+}
+
+public enum CodexTaskForecastModel: String, Codable, Sendable {
+    case empirical
+    case logNormal = "log_normal"
+    case normalDiagnostic = "normal_diagnostic"
+    case baseline
+}
+
+public struct CodexPlanAwareTaskEstimate: Equatable, Sendable {
+    public let typicalTotal: TimeInterval?
+    public let planUpperTotal: TimeInterval?
+    public let safeAwayRemaining: TimeInterval?
+    public let model: CodexTaskForecastModel
+    public let confidence: CodexTaskDurationConfidence
+    public let sampleCount: Int
+    public let scope: CodexTaskDurationEstimateScope
+    public let planSummary: String?
+
+    public init(
+        typicalTotal: TimeInterval?,
+        planUpperTotal: TimeInterval?,
+        safeAwayRemaining: TimeInterval?,
+        model: CodexTaskForecastModel,
+        confidence: CodexTaskDurationConfidence,
+        sampleCount: Int,
+        scope: CodexTaskDurationEstimateScope,
+        planSummary: String?
+    ) {
+        self.typicalTotal = typicalTotal
+        self.planUpperTotal = planUpperTotal
+        self.safeAwayRemaining = safeAwayRemaining
+        self.model = model
+        self.confidence = confidence
+        self.sampleCount = max(0, sampleCount)
+        self.scope = scope
+        self.planSummary = planSummary
+    }
 }
 
 public enum CodexGoalStatus: String, Codable, Sendable {
@@ -113,6 +231,7 @@ public struct CodexSwarmActivity: Equatable, Identifiable, Sendable {
 }
 
 public enum CodexForecastEntityType: String, Codable, Sendable {
+    case task
     case goal
     case swarm
 }
@@ -129,6 +248,10 @@ public struct CodexForecastObservation: Equatable, Identifiable, Sendable {
     public let horizon: TimeInterval?
     public let sampleCount: Int
     public let scope: CodexTaskDurationEstimateScope
+    public let typicalTotal: TimeInterval?
+    public let upperTotal: TimeInterval?
+    public let safeAwayRemaining: TimeInterval?
+    public let model: CodexTaskForecastModel
     public let actualDuration: TimeInterval?
     public let actualStatus: String?
 
@@ -144,6 +267,10 @@ public struct CodexForecastObservation: Equatable, Identifiable, Sendable {
         horizon: TimeInterval?,
         sampleCount: Int,
         scope: CodexTaskDurationEstimateScope,
+        typicalTotal: TimeInterval? = nil,
+        upperTotal: TimeInterval? = nil,
+        safeAwayRemaining: TimeInterval? = nil,
+        model: CodexTaskForecastModel = .baseline,
         actualDuration: TimeInterval? = nil,
         actualStatus: String? = nil
     ) {
@@ -158,6 +285,10 @@ public struct CodexForecastObservation: Equatable, Identifiable, Sendable {
         self.horizon = horizon
         self.sampleCount = max(0, sampleCount)
         self.scope = scope
+        self.typicalTotal = typicalTotal
+        self.upperTotal = upperTotal
+        self.safeAwayRemaining = safeAwayRemaining
+        self.model = model
         self.actualDuration = actualDuration
         self.actualStatus = actualStatus
     }

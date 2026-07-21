@@ -8,6 +8,7 @@ import Observation
 final class TaskMonitorViewModel {
     private let coordinator: TaskMonitorCoordinator
     private let estimator = CodexTaskDurationEstimator()
+    private let planEstimator = CodexPlanAwareTaskDurationEstimator()
     private let goalEstimator = CodexGoalDurationEstimator()
     private let swarmEstimator = CodexSwarmDurationEstimator()
     private let rhythmEstimator = CodexWorkRhythmEstimator()
@@ -16,6 +17,7 @@ final class TaskMonitorViewModel {
     private let navigator = TaskNavigator()
     private var healthTracker = CodexTaskMonitorHealthTracker()
     private(set) var tasks: [CodexTaskActivity] = []
+    private(set) var plans: [String: CodexTaskPlanSnapshot] = [:]
     private(set) var goals: [CodexGoalActivity] = []
     private(set) var swarms: [CodexSwarmActivity] = []
     private(set) var events: [CodexTaskStatusEvent] = []
@@ -31,12 +33,18 @@ final class TaskMonitorViewModel {
     private var isReloading = false
     private var reloadRequested = false
     var focusLoadEnabled: Bool
+    var planAwareEstimatesEnabled: Bool
     var onTasksReloaded: (([CodexTaskActivity]) -> Void)?
     var onActivityReloaded: (([CodexTaskActivity], [CodexGoalActivity], [CodexSwarmActivity]) -> Void)?
 
-    init(coordinator: TaskMonitorCoordinator, focusLoadEnabled: Bool = false) {
+    init(
+        coordinator: TaskMonitorCoordinator,
+        focusLoadEnabled: Bool = false,
+        planAwareEstimatesEnabled: Bool = true
+    ) {
         self.coordinator = coordinator
         self.focusLoadEnabled = focusLoadEnabled
+        self.planAwareEstimatesEnabled = planAwareEstimatesEnabled
         coordinator.onChange = { [weak self] in self?.reload() }
         coordinator.onError = { [weak self] error in
             guard let self else { return }
@@ -62,11 +70,13 @@ final class TaskMonitorViewModel {
                     let dayStart = Calendar.current.startOfDay(for: currentReloadDate)
                     let checkInStart = currentReloadDate.addingTimeInterval(-90 * 24 * 60 * 60)
                     async let loadedTasks = coordinator.tasks()
+                    async let loadedPlans = coordinator.taskPlans()
                     async let loadedGoals = coordinator.goals()
                     async let loadedSwarms = coordinator.swarms()
                     async let loadedEvents = coordinator.statusEvents(since: dayStart)
                     async let loadedCheckIns = coordinator.checkIns(since: checkInStart)
                     tasks = try await loadedTasks
+                    plans = Dictionary(uniqueKeysWithValues: try await loadedPlans.map { ($0.taskID, $0) })
                     goals = try await loadedGoals
                     swarms = try await loadedSwarms
                     events = try await loadedEvents
@@ -130,7 +140,48 @@ final class TaskMonitorViewModel {
     }
 
     func estimate(for task: CodexTaskActivity, now: Date) -> CodexTaskDurationEstimate? {
-        estimator.estimate(for: task, now: now, history: tasks)
+        if planAwareEstimatesEnabled,
+           let plan = plans[task.id],
+           let planEstimate = planEstimator.estimate(
+               for: task,
+               plan: plan,
+               now: now,
+               history: tasks,
+               plans: plans
+           ) {
+            recordForecast(
+                entityType: .task,
+                entityID: task.id,
+                elapsedDuration: activeElapsed(for: task, now: now),
+                estimate: planEstimate,
+                forecast: nil,
+                planAware: planAwareEstimate(for: task, now: now),
+                now: now
+            )
+            return planEstimate
+        }
+        let fallback = estimator.estimate(for: task, now: now, history: tasks)
+        recordForecast(
+            entityType: .task,
+            entityID: task.id,
+            elapsedDuration: activeElapsed(for: task, now: now),
+            estimate: fallback,
+            forecast: nil,
+            planAware: nil,
+            now: now
+        )
+        return fallback
+    }
+
+    func planAwareEstimate(for task: CodexTaskActivity, now: Date) -> CodexPlanAwareTaskEstimate? {
+        guard planAwareEstimatesEnabled, let plan = plans[task.id] else { return nil }
+        return planEstimator.initialEstimate(
+            for: task,
+            plan: plan,
+            now: now,
+            history: tasks,
+            plans: plans
+        )
     }
 
     func completionForecast(
@@ -138,12 +189,49 @@ final class TaskMonitorViewModel {
         within horizon: TimeInterval,
         now: Date
     ) -> CodexTaskCompletionForecast? {
-        estimator.completionForecast(
+        if planAwareEstimatesEnabled,
+           let plan = plans[task.id],
+           let forecast = planEstimator.completionForecast(
+               for: task,
+               plan: plan,
+               within: horizon,
+               now: now,
+               history: tasks,
+               plans: plans
+           ) {
+            recordForecast(
+                entityType: .task,
+                entityID: task.id,
+                elapsedDuration: activeElapsed(for: task, now: now),
+                estimate: planEstimator.estimate(
+                    for: task,
+                    plan: plan,
+                    now: now,
+                    history: tasks,
+                    plans: plans
+                ),
+                forecast: forecast,
+                planAware: planAwareEstimate(for: task, now: now),
+                now: now
+            )
+            return forecast
+        }
+        let fallback = estimator.completionForecast(
             for: task,
             within: horizon,
             now: now,
             history: tasks
         )
+        recordForecast(
+            entityType: .task,
+            entityID: task.id,
+            elapsedDuration: activeElapsed(for: task, now: now),
+            estimate: estimator.estimate(for: task, now: now, history: tasks),
+            forecast: fallback,
+            planAware: nil,
+            now: now
+        )
+        return fallback
     }
 
     func goalEstimate(for goal: CodexGoalActivity, now: Date) -> CodexTaskDurationEstimate? {
@@ -196,6 +284,7 @@ final class TaskMonitorViewModel {
         elapsedDuration: TimeInterval,
         estimate: CodexTaskDurationEstimate?,
         forecast: CodexTaskCompletionForecast?,
+        planAware: CodexPlanAwareTaskEstimate? = nil,
         now: Date
     ) {
         guard let estimate else { return }
@@ -211,11 +300,21 @@ final class TaskMonitorViewModel {
             probabilityWithinHorizon: forecast?.probability,
             horizon: forecast?.horizon,
             sampleCount: estimate.sampleCount,
-            scope: estimate.scope
+            scope: estimate.scope,
+            typicalTotal: planAware?.typicalTotal,
+            upperTotal: planAware?.planUpperTotal,
+            safeAwayRemaining: planAware?.safeAwayRemaining,
+            model: planAware?.model ?? .baseline
         )
         Task { @MainActor [weak self] in
             try? await self?.coordinator.recordForecast(observation)
         }
+    }
+
+    private func activeElapsed(for task: CodexTaskActivity, now: Date) -> TimeInterval {
+        let raw = task.startedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        let openWaiting = task.waitingStartedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        return max(0, raw - task.waitingDuration - openWaiting)
     }
 
     func typicalDuration(at now: Date) -> CodexTaskDurationDistribution? {

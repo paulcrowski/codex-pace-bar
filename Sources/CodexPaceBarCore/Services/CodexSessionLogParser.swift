@@ -41,6 +41,14 @@ public struct CodexSessionLogParser: Sendable {
 
         case "response_item":
             guard let timestamp = envelope.timestamp else { return nil }
+            let resolvedTurnID = envelope.payload.turnID ?? envelope.metadata?.turnID
+            if let features = parsePlanFeatures(from: envelope.payload) {
+                return .turnPlanObserved(
+                    turnID: resolvedTurnID,
+                    observedAt: timestamp,
+                    features: features
+                )
+            }
             if (envelope.payload.type == "function_call" || envelope.payload.type == "custom_tool_call"),
                envelope.payload.name == "spawn_agent" {
                 return .swarmAgentSpawned(occurredAt: timestamp)
@@ -139,17 +147,69 @@ public struct CodexSessionLogParser: Sendable {
         return nil
     }
 
+    private func parsePlanFeatures(from payload: Payload) -> CodexTaskPlanFeatures? {
+        guard let input = payload.input,
+              payload.name == "update_plan" || (payload.name == "exec" && input.contains("update_plan"))
+        else { return nil }
+        let object = extractJSONObject(from: input) ?? (try? JSONSerialization.jsonObject(with: Data(input.utf8)))
+        guard let object else { return nil }
+        return CodexTaskPlanFeatureExtractor().features(from: object)
+    }
+
+    private func extractJSONObject(from source: String) -> Any? {
+        guard let marker = source.range(of: "update_plan") else { return nil }
+        let suffix = source[marker.upperBound...]
+        guard let opening = suffix.firstIndex(of: "{") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var end: String.Index?
+        var index = opening
+        while index < suffix.endIndex {
+            let character = suffix[index]
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    inString = false
+                }
+            } else if character == "\"" {
+                inString = true
+            } else if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    end = suffix.index(after: index)
+                    break
+                }
+            }
+            index = suffix.index(after: index)
+        }
+        guard let end,
+              let data = String(suffix[opening..<end]).data(using: .utf8)
+        else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
     private struct Envelope: Decodable {
         let type: String
         let payload: Payload
         let timestamp: Date?
+        let metadata: Metadata?
 
-        enum CodingKeys: String, CodingKey { case type, payload, timestamp }
+        enum CodingKeys: String, CodingKey {
+            case type, payload, timestamp
+            case metadata = "internal_chat_message_metadata_passthrough"
+        }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             type = try container.decode(String.self, forKey: .type)
             payload = try container.decode(Payload.self, forKey: .payload)
+            metadata = try? container.decode(Metadata.self, forKey: .metadata)
             if let seconds = try? container.decode(TimeInterval.self, forKey: .timestamp) {
                 timestamp = Date(timeIntervalSince1970: seconds)
             } else if let value = try? container.decode(String.self, forKey: .timestamp) {
@@ -159,6 +219,12 @@ public struct CodexSessionLogParser: Sendable {
                 timestamp = nil
             }
         }
+    }
+
+    private struct Metadata: Decodable {
+        let turnID: String?
+
+        enum CodingKeys: String, CodingKey { case turnID = "turn_id" }
     }
 
     private struct Payload: Decodable {
@@ -174,6 +240,7 @@ public struct CodexSessionLogParser: Sendable {
         let durationMilliseconds: TimeInterval?
         let timeToFirstTokenMilliseconds: TimeInterval?
         let name: String?
+        let input: String?
         let output: OutputValue?
         let goal: GoalPayload?
 
@@ -190,6 +257,7 @@ public struct CodexSessionLogParser: Sendable {
             case durationMilliseconds = "duration_ms"
             case timeToFirstTokenMilliseconds = "time_to_first_token_ms"
             case name
+            case input
             case output
             case goal
         }

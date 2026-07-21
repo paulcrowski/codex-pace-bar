@@ -52,6 +52,16 @@ struct SettingsView: View {
 
             SettingsDivider()
 
+            SettingsRow(
+                icon: "chart.bar.xaxis",
+                title: "Personalized task estimates",
+                subtitle: "Uses your local plan history to estimate total time and when it is safe to step away."
+            ) {
+                Toggle("Personalized task estimates", isOn: $settings.planAwareEstimatesEnabled)
+            }
+
+            SettingsDivider()
+
             SettingsRow(icon: "terminal", title: "Codex executable path") {
                 TextField("Codex executable path", text: $settings.codexExecutablePath)
                     .textFieldStyle(.roundedBorder)

@@ -45,6 +45,7 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: nil,
+                                        planEstimate: nil,
                                         completionForecast: nil,
                                         now: context.date,
                                         canNavigate: model.canNavigate(to: task),
@@ -83,6 +84,7 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: model.estimate(for: task, now: context.date),
+                                        planEstimate: model.planAwareEstimate(for: task, now: context.date),
                                         completionForecast: model.completionForecast(
                                             for: task,
                                             within: 30 * 60,
@@ -114,6 +116,7 @@ struct TaskMonitorView: View {
                                     TaskMonitorRow(
                                         task: task,
                                         estimate: nil,
+                                        planEstimate: nil,
                                         completionForecast: nil,
                                         now: context.date,
                                         canNavigate: model.canNavigate(to: task),
@@ -322,6 +325,7 @@ private struct DailyCheckIn: View {
 private struct TaskMonitorRow: View {
     let task: CodexTaskActivity
     let estimate: CodexTaskDurationEstimate?
+    let planEstimate: CodexPlanAwareTaskEstimate?
     let completionForecast: CodexTaskCompletionForecast?
     let now: Date
     let canNavigate: Bool
@@ -347,7 +351,9 @@ private struct TaskMonitorRow: View {
 
                 HStack(alignment: .top, spacing: 14) {
                     TaskMonitorMetric(label: "Elapsed", value: task.durationText(at: now))
-                    if let estimate {
+                    if let planEstimate {
+                        TaskPlanAwareEstimateMetric(estimate: planEstimate)
+                    } else if let estimate {
                         Rectangle()
                             .fill(.quaternary)
                             .frame(width: 1, height: 28)
@@ -382,6 +388,44 @@ private struct TaskMonitorRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.14), value: isHovered)
+    }
+}
+
+private struct TaskPlanAwareEstimateMetric: View {
+    let estimate: CodexPlanAwareTaskEstimate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if estimate.confidence == .learned,
+               let typicalTotal = estimate.typicalTotal,
+               let upperTotal = estimate.planUpperTotal {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("Typical total")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(typicalTotal.durationText)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.primary)
+                }
+                Text("Plan up to \(upperTotal.durationText) · \(estimate.planSummary ?? "planned task")")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                if let safeAway = estimate.safeAwayRemaining {
+                    Text(safeAway < 5 * 60
+                        ? "Could finish anytime"
+                        : "Good time to step away: about \(safeAway.durationText)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
+            } else {
+                Text("Learning your work pattern")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("\(estimate.sampleCount) personal plan matches so far")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

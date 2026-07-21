@@ -163,4 +163,21 @@ struct CodexSessionLogParserTests {
             occurredAt: ISO8601DateFormatter().date(from: "2026-07-21T10:02:00Z")!
         ))
     }
+
+    @Test
+    func parsesInitialPlanAsBoundedFeaturesWithoutPersistingStepText() throws {
+        let line = #"{"timestamp":"2026-07-21T10:03:00Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"tools.update_plan({\"plan\":[{\"step\":\"Fix and test the parser\",\"status\":\"in_progress\"},{\"step\":\"Build and verify runtime\",\"status\":\"pending\"}]})"},"internal_chat_message_metadata_passthrough":{"turn_id":"turn-plan"}}"#
+
+        guard case let .turnPlanObserved(turnID, _, features) = parser.parseLine(line) else {
+            Issue.record("Expected a plan observation")
+            return
+        }
+        #expect(turnID == "turn-plan")
+        #expect(features.stepCount == 2)
+        #expect(features.workUnitCount >= 2)
+        #expect(features.verificationCount >= 1)
+        #expect(features.buildCount >= 1)
+        #expect(features.category == .smallFix)
+        #expect(features.complexity == .medium)
+    }
 }

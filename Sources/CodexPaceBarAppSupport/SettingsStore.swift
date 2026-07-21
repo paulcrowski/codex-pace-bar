@@ -127,6 +127,14 @@ public final class SettingsStore {
         }
     }
 
+    public var planAwareEstimatesEnabled: Bool {
+        didSet {
+            guard planAwareEstimatesEnabled != oldValue else { return }
+            defaults.set(planAwareEstimatesEnabled, forKey: Keys.planAwareEstimatesEnabled)
+            onChange?(.forecastMode)
+        }
+    }
+
     public var codexExecutablePath: String {
         didSet {
             guard codexExecutablePath != oldValue else {
@@ -209,6 +217,7 @@ public final class SettingsStore {
             defaults.set(initialMobileTopic, forKey: Keys.mobileNotificationTopic)
         }
         self.historyBasedForecastEnabled = defaults.object(forKey: Keys.historyBasedForecastEnabled) as? Bool ?? true
+        self.planAwareEstimatesEnabled = defaults.object(forKey: Keys.planAwareEstimatesEnabled) as? Bool ?? true
         self.codexExecutablePath = defaults.string(forKey: Keys.codexExecutablePath) ?? "codex"
         let storedInterval = defaults.object(forKey: Keys.refreshIntervalSeconds) as? Int ?? Self.defaultRefreshInterval
         self.refreshIntervalSeconds = Self.clampRefreshInterval(storedInterval)
@@ -241,6 +250,7 @@ public final class SettingsStore {
         static let silentGoalsAndSwarmsEnabled = "silentGoalsAndSwarmsEnabled"
         static let mobileNotificationTopic = "mobileNotificationTopic"
         static let historyBasedForecastEnabled = "historyBasedForecastEnabled"
+        static let planAwareEstimatesEnabled = "planAwareEstimatesEnabled"
         static let codexExecutablePath = "codexExecutablePath"
         static let refreshIntervalSeconds = "refreshIntervalSeconds"
         static let deltaThresholdPercentagePoints = "deltaThresholdPercentagePoints"

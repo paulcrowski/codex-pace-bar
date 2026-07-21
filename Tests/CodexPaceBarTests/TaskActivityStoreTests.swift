@@ -92,6 +92,102 @@ struct TaskActivityStoreTests {
     }
 
     @Test
+    func persistsTheFirstPlanSnapshotWithoutRawStepText() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session-1")
+        let observedAt = Date(timeIntervalSince1970: 1_784_373_000)
+        let features = CodexTaskPlanFeatures(
+            stepCount: 4,
+            workUnitCount: 8,
+            verificationCount: 2,
+            buildCount: 1,
+            runtimeCheckCount: 1,
+            repositoryCount: 1,
+            plannedParallelism: 0,
+            category: .audit,
+            complexity: .complex
+        )
+        try await store.apply(.turnStarted(turnID: "turn", startedAt: observedAt))
+        try await store.apply(.turnPlanObserved(turnID: "turn", observedAt: observedAt, features: features))
+        try await store.apply(.turnPlanObserved(
+            turnID: "turn",
+            observedAt: observedAt.addingTimeInterval(1),
+            features: CodexTaskPlanFeatures(
+                stepCount: 99,
+                workUnitCount: 99,
+                verificationCount: 0,
+                buildCount: 0,
+                runtimeCheckCount: 0,
+                repositoryCount: 1,
+                plannedParallelism: 0,
+                category: .question,
+                complexity: .veryComplex
+            )
+        ))
+
+        let restartedStore = try TaskActivityStore(databaseURL: databaseURL)
+        let snapshot = try #require(await restartedStore.taskPlans().first)
+        #expect(snapshot.features == features)
+        #expect(snapshot.taskID == "session-1:turn")
+    }
+
+    @Test
+    func linksTaskForecastToItsCompletedOutcome() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let start = Date(timeIntervalSince1970: 1_784_373_000)
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+        try await store.apply(.turnStarted(turnID: "turn", startedAt: start))
+        try await store.apply(.turnPlanObserved(
+            turnID: "turn",
+            observedAt: start,
+            features: CodexTaskPlanFeatures(
+                stepCount: 3,
+                workUnitCount: 3,
+                verificationCount: 1,
+                buildCount: 1,
+                runtimeCheckCount: 0,
+                repositoryCount: 1,
+                plannedParallelism: 0,
+                category: .feature,
+                complexity: .medium
+            )
+        ))
+        try await store.recordForecast(CodexForecastObservation(
+            id: "task:session:turn:0",
+            entityType: .task,
+            entityID: "session:turn",
+            observedAt: start.addingTimeInterval(60),
+            elapsedDuration: 60,
+            medianRemaining: 120,
+            safeRemaining: 300,
+            probabilityWithinHorizon: 0.8,
+            horizon: 300,
+            sampleCount: 12,
+            scope: .project,
+            typicalTotal: 180,
+            upperTotal: 360,
+            safeAwayRemaining: 60,
+            model: .empirical
+        ))
+
+        try await store.apply(.turnCompleted(
+            turnID: "turn",
+            completedAt: start.addingTimeInterval(240),
+            duration: 240,
+            timeToFirstToken: nil
+        ))
+
+        let observation = try #require(await store.forecastObservations().first)
+        #expect(observation.entityType == .task)
+        #expect(observation.actualDuration == 240)
+        #expect(observation.actualStatus == CodexTaskStatus.completed.rawValue)
+        #expect(observation.upperTotal == 360)
+        #expect(observation.model == .empirical)
+    }
+
+    @Test
     func recordsWaitingTimeStatusTimelineAndDailyCheckIn() async throws {
         let databaseURL = try makeDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL) }

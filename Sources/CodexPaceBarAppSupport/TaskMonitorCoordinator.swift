@@ -198,6 +198,10 @@ public final class TaskMonitorCoordinator {
         try await queryStore.swarms()
     }
 
+    public func taskPlans() async throws -> [CodexTaskPlanSnapshot] {
+        try await queryStore.taskPlans()
+    }
+
     public func recordForecast(_ observation: CodexForecastObservation) async throws {
         try await queryStore.recordForecast(observation)
     }
