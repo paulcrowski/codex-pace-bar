@@ -1,5 +1,33 @@
 import Foundation
 
+/// Controls how long an active record remains visible when no new local event arrives.
+///
+/// Ordinary turns are intentionally short-lived: a stale hook row should not make the
+/// monitor claim that work is still running. Active goals get a longer window because a
+/// goal can legitimately span many turns and hours without emitting a turn event.
+public struct CodexTaskFreshnessPolicy: Sendable {
+    public let ordinaryWindow: TimeInterval
+    public let goalWindow: TimeInterval
+
+    public init(
+        ordinaryWindow: TimeInterval = 30 * 60,
+        goalWindow: TimeInterval = 2 * 60 * 60
+    ) {
+        self.ordinaryWindow = max(0, ordinaryWindow)
+        self.goalWindow = max(self.ordinaryWindow, goalWindow)
+    }
+
+    public func isFresh(
+        task: CodexTaskActivity,
+        now: Date,
+        activeGoalThreadIDs: Set<String>
+    ) -> Bool {
+        let lastEvent = task.lastEventAt ?? task.startedAt ?? .distantPast
+        let window = activeGoalThreadIDs.contains(task.sessionID) ? goalWindow : ordinaryWindow
+        return now.timeIntervalSince(lastEvent) <= window
+    }
+}
+
 public enum CodexTaskSummaryState: Equatable, Sendable {
     case noActiveTasks
     case working(count: Int)

@@ -14,6 +14,7 @@ final class TaskMonitorViewModel {
     private let rhythmEstimator = CodexWorkRhythmEstimator()
     private let checkInPolicy = CodexDailyCheckInPolicy()
     private let summaryCalculator = CodexTaskDailySummaryCalculator()
+    private let freshnessPolicy = CodexTaskFreshnessPolicy()
     private let navigator = TaskNavigator()
     private var healthTracker = CodexTaskMonitorHealthTracker()
     private(set) var tasks: [CodexTaskActivity] = []
@@ -118,7 +119,7 @@ final class TaskMonitorViewModel {
         goals.first { goal in
             goal.isActive
                 && goal.updatedAt <= now
-                && now.timeIntervalSince(goal.updatedAt) <= Self.aggregateFreshnessWindow
+                && now.timeIntervalSince(goal.updatedAt) <= freshnessPolicy.goalWindow
         }
     }
 
@@ -126,11 +127,9 @@ final class TaskMonitorViewModel {
         swarms.first { swarm in
             swarm.isActive
                 && swarm.firstSpawnedAt <= now
-                && now.timeIntervalSince(swarm.firstSpawnedAt) <= Self.aggregateFreshnessWindow
+                && now.timeIntervalSince(swarm.firstSpawnedAt) <= freshnessPolicy.goalWindow
         }
     }
-
-    private static let aggregateFreshnessWindow: TimeInterval = 2 * 60 * 60
 
     func recentlyFinished(at now: Date) -> [CodexTaskActivity] {
         let start = Calendar.current.startOfDay(for: now)
@@ -393,9 +392,16 @@ final class TaskMonitorViewModel {
     }
 
     private func freshTasks(at now: Date) -> [CodexTaskActivity] {
-        tasks.filter { task in
+        let activeGoalThreadIDs = Set(
+            goals.filter { $0.isActive }.map { $0.threadID }
+        )
+        return tasks.filter { task in
             guard task.status.isActive else { return false }
-            return now.timeIntervalSince(task.lastEventAt ?? task.startedAt ?? .distantPast) <= 2 * 60 * 60
+            return freshnessPolicy.isFresh(
+                task: task,
+                now: now,
+                activeGoalThreadIDs: activeGoalThreadIDs
+            )
         }
     }
 

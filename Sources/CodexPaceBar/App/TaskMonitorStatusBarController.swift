@@ -8,6 +8,8 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let model: TaskMonitorViewModel
+    private let freshnessPolicy = CodexTaskFreshnessPolicy()
+    private var activeGoalThreadIDs = Set<String>()
     private var outsideClickMonitor: Any?
 
     init(model: TaskMonitorViewModel) {
@@ -35,13 +37,26 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
             previousReloadHandler?(tasks)
             self?.updateStatusItem(tasks: tasks)
         }
+        let previousActivityReloadHandler = model.onActivityReloaded
+        model.onActivityReloaded = { [weak self] tasks, goals, swarms in
+            previousActivityReloadHandler?(tasks, goals, swarms)
+            self?.activeGoalThreadIDs = Set(
+                goals.filter { $0.isActive }.map { $0.threadID }
+            )
+            self?.updateStatusItem(tasks: tasks)
+        }
     }
 
     private func updateStatusItem(tasks: [CodexTaskActivity]) {
         guard let button = statusItem.button else { return }
         let now = Date()
         let fresh = tasks.filter {
-            now.timeIntervalSince($0.lastEventAt ?? $0.startedAt ?? .distantPast) <= 2 * 60 * 60
+            $0.status.isActive
+                && freshnessPolicy.isFresh(
+                    task: $0,
+                    now: now,
+                    activeGoalThreadIDs: activeGoalThreadIDs
+                )
         }
         let needs = fresh.filter { $0.status.isWaitingForUser }.count
         let working = fresh.filter(\.isRunning).count

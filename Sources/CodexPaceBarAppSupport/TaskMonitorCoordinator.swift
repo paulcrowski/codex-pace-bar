@@ -198,8 +198,17 @@ public final class TaskMonitorCoordinator {
         let nativeGoals = try nativeGoalStore.activeGoals()
         guard !nativeGoals.isEmpty else { return loggedGoals }
 
+        let taskDirectories = Dictionary<String, String>(
+            try await queryStore.tasks().compactMap { task in
+                guard let workingDirectory = task.workingDirectory else { return nil }
+                return (task.sessionID, workingDirectory)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         var merged = loggedGoals
-        for nativeGoal in nativeGoals {
+        for goal in nativeGoals {
+            var nativeGoal = goal
+            nativeGoal.workingDirectory = taskDirectories[nativeGoal.threadID]
             if let index = merged.firstIndex(where: { $0.threadID == nativeGoal.threadID }) {
                 var existing = merged[index]
                 guard nativeGoal.updatedAt >= existing.updatedAt else { continue }
