@@ -1,10 +1,48 @@
 import CodexPaceBarAppSupport
 import CodexPaceBarCore
 import Foundation
+import SQLite3
 import Testing
 
 @MainActor
 struct TaskMonitorCoordinatorTests {
+    @Test
+    func mergesActiveNativeGoalWhenSessionLogHasNoGoalMarker() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let nativeURL = directory.appendingPathComponent("goals.sqlite")
+        var database: OpaquePointer?
+        #expect(sqlite3_open(nativeURL.path, &database) == SQLITE_OK)
+        let schema = """
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        INSERT INTO thread_goals VALUES ('native-thread', 'goal-1', 'private objective', 'active', NULL, 10, 900, 1784729000000, 1784729060000);
+        """
+        #expect(sqlite3_exec(database, schema, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(database)
+
+        let coordinator = try TaskMonitorCoordinator(
+            catalog: CodexSessionLogCatalog(rootURL: directory),
+            databaseURL: directory.appendingPathComponent("tasks.sqlite"),
+            nativeGoalStore: CodexNativeGoalStore(databaseURL: nativeURL)
+        )
+        let goals = try await coordinator.goals()
+
+        let goal = try #require(goals.first)
+        #expect(goal.threadID == "native-thread")
+        #expect(goal.status == .active)
+        #expect(goal.activeDuration == 900)
+    }
+
     @Test
     func receivesSanitizedHookEventsWithoutPolling() async throws {
         let directory = try makeDirectory()

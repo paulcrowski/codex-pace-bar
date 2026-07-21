@@ -21,6 +21,7 @@ public final class TaskMonitorCoordinator {
     private let queryStore: TaskActivityStore
     private let watcherQueue: DispatchQueue
     private let hookEventURL: URL
+    private let nativeGoalStore: CodexNativeGoalStore
     private var stores: [URL: TaskActivityStore] = [:]
     private var watchers: [URL: CodexSessionLogFileWatcher] = [:]
     private var directoryWatchers: [URL: CodexSessionLogDirectoryWatcher] = [:]
@@ -36,6 +37,7 @@ public final class TaskMonitorCoordinator {
         catalog: CodexSessionLogCatalog = CodexSessionLogCatalog(),
         databaseURL: URL = TaskMonitorCoordinator.defaultDatabaseURL,
         hookEventURL: URL? = nil,
+        nativeGoalStore: CodexNativeGoalStore = CodexNativeGoalStore(),
         watcherQueue: DispatchQueue = DispatchQueue(
             label: "codex-pace-bar.task-monitor",
             qos: .utility
@@ -44,6 +46,7 @@ public final class TaskMonitorCoordinator {
         self.catalog = catalog
         self.databaseURL = databaseURL
         self.watcherQueue = watcherQueue
+        self.nativeGoalStore = nativeGoalStore
         self.hookEventURL = hookEventURL ?? (
             databaseURL == Self.defaultDatabaseURL
                 ? Self.defaultHookEventURL
@@ -191,7 +194,24 @@ public final class TaskMonitorCoordinator {
     }
 
     public func goals() async throws -> [CodexGoalActivity] {
-        try await queryStore.goals()
+        let loggedGoals = try await queryStore.goals()
+        let nativeGoals = try nativeGoalStore.activeGoals()
+        guard !nativeGoals.isEmpty else { return loggedGoals }
+
+        var merged = loggedGoals
+        for nativeGoal in nativeGoals {
+            if let index = merged.firstIndex(where: { $0.threadID == nativeGoal.threadID }) {
+                var existing = merged[index]
+                guard nativeGoal.updatedAt >= existing.updatedAt else { continue }
+                existing.updatedAt = nativeGoal.updatedAt
+                existing.status = nativeGoal.status
+                existing.activeDuration = nativeGoal.activeDuration
+                merged[index] = existing
+            } else {
+                merged.append(nativeGoal)
+            }
+        }
+        return merged.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     public func swarms() async throws -> [CodexSwarmActivity] {
