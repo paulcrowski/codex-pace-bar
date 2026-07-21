@@ -80,10 +80,6 @@ public final class RefreshCoordinator {
             break
         case .mainTaskSummary:
             break
-        case .taskNotifications:
-            break
-        case .mobileTaskNotifications:
-            break
         case .focusLoad:
             break
         case .refreshInterval:

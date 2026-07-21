@@ -8,21 +8,18 @@ final class SettingsWindowController {
     private let launchAtLogin: LaunchAtLoginController
     private let onOpenTaskMonitor: () -> Void
     private let onGetTaskHookStatus: () -> CodexHookSetupStatus
-    private let onSendMobileNotificationTest: () async -> Bool
     private var window: NSWindow?
 
     init(
         settings: SettingsStore,
         launchAtLogin: LaunchAtLoginController,
         onOpenTaskMonitor: @escaping () -> Void,
-        onGetTaskHookStatus: @escaping () -> CodexHookSetupStatus,
-        onSendMobileNotificationTest: @escaping () async -> Bool
+        onGetTaskHookStatus: @escaping () -> CodexHookSetupStatus
     ) {
         self.settings = settings
         self.launchAtLogin = launchAtLogin
         self.onOpenTaskMonitor = onOpenTaskMonitor
         self.onGetTaskHookStatus = onGetTaskHookStatus
-        self.onSendMobileNotificationTest = onSendMobileNotificationTest
     }
 
     func show() {
@@ -39,8 +36,7 @@ final class SettingsWindowController {
                 settings: settings,
                 launchAtLogin: launchAtLogin,
                 onOpenTaskMonitor: onOpenTaskMonitor,
-                onGetTaskHookStatus: onGetTaskHookStatus,
-                onSendMobileNotificationTest: onSendMobileNotificationTest
+                onGetTaskHookStatus: onGetTaskHookStatus
             )
         )
         let window = NSWindow(contentViewController: hostingController)

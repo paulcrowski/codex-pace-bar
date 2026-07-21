@@ -9,8 +9,6 @@ struct SettingsView: View {
     @Bindable var launchAtLogin: LaunchAtLoginController
     let onOpenTaskMonitor: () -> Void
     let onGetTaskHookStatus: () -> CodexHookSetupStatus
-    let onSendMobileNotificationTest: () async -> Bool
-    @State private var showsMobilePairing = false
     @State private var showsHookSetup = false
 
     var body: some View {
@@ -161,77 +159,6 @@ struct SettingsView: View {
             SettingsDivider()
 
             SettingsRow(
-                icon: "iphone",
-                title: "Phone notifications · Experimental",
-                subtitle: settings.taskMonitorEnabled
-                    ? "Sends private task-ready alerts through ntfy to iOS or Android."
-                    : "Enable Task Monitor to use this feature."
-            ) {
-                HStack(spacing: 10) {
-                    if settings.mobileTaskNotificationsEnabled {
-                        Button("Pair") { showsMobilePairing = true }
-                            .buttonStyle(.bordered)
-                    }
-                    Toggle(
-                        "Phone notifications",
-                        isOn: Binding(
-                            get: { settings.mobileTaskNotificationsEnabled },
-                            set: { enabled in
-                                settings.mobileTaskNotificationsEnabled = enabled
-                                if enabled { showsMobilePairing = true }
-                            }
-                        )
-                    )
-                        .disabled(!settings.taskMonitorEnabled)
-                }
-            }
-            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
-
-            SettingsDivider()
-
-            SettingsRow(
-                icon: "text.bubble",
-                title: "Phone notification details",
-                subtitle: settings.mobileTaskNotificationsEnabled
-                    ? "Includes project name and duration. Prompts always stay private."
-                    : "Enable Phone notifications to add safe task context."
-            ) {
-                Toggle("Phone notification details", isOn: $settings.mobileNotificationDetailsEnabled)
-                    .disabled(!settings.taskMonitorEnabled || !settings.mobileTaskNotificationsEnabled)
-            }
-            .opacity(settings.taskMonitorEnabled && settings.mobileTaskNotificationsEnabled ? 1 : 0.55)
-
-            SettingsDivider()
-
-            SettingsRow(
-                icon: "moon.stars",
-                title: "Swarms / Goals Silent",
-                subtitle: settings.mobileTaskNotificationsEnabled
-                    ? "Batches finished alerts after 90 seconds of quiet. Needs you stays instant."
-                    : "Enable Phone notifications to silence goal and swarm completion noise."
-            ) {
-                Toggle("Swarms and goals silent", isOn: $settings.silentGoalsAndSwarmsEnabled)
-                    .disabled(!settings.taskMonitorEnabled || !settings.mobileTaskNotificationsEnabled)
-            }
-            .opacity(settings.taskMonitorEnabled && settings.mobileTaskNotificationsEnabled ? 1 : 0.55)
-
-            SettingsDivider()
-
-            SettingsRow(
-                icon: "bell.badge",
-                title: "Task notifications",
-                subtitle: settings.taskMonitorEnabled
-                    ? "Alerts when a task needs approval or input."
-                    : "Enable Task Monitor to use this feature."
-            ) {
-                Toggle("Task notifications", isOn: $settings.taskNotificationsEnabled)
-                    .disabled(!settings.taskMonitorEnabled)
-            }
-            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
-
-            SettingsDivider()
-
-            SettingsRow(
                 icon: "gauge.with.dots.needle.67percent",
                 title: "Work rhythm / Focus Load",
                 subtitle: settings.taskMonitorEnabled
@@ -255,12 +182,6 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 0)
                 .fill(.regularMaterial)
                 .overlay(Color.black.opacity(0.08))
-        }
-        .sheet(isPresented: $showsMobilePairing) {
-            MobileNotificationPairingView(
-                settings: settings,
-                onSendTest: onSendMobileNotificationTest
-            )
         }
         .sheet(isPresented: $showsHookSetup) {
             CodexHookSetupView(loadStatus: onGetTaskHookStatus)
@@ -312,7 +233,7 @@ private struct CodexHookSetupView: View {
                     .keyboardShortcut(.defaultAction)
             }
 
-            Text("Task Monitor and task-finished phone alerts still work from local Codex session logs. Hooks add immediate prompt, permission, and stop updates.")
+            Text("Task Monitor reads local Codex session logs. Hooks add immediate prompt, permission, and stop updates.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -460,190 +381,6 @@ private struct CodexHookSetupView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(steps, forType: .string)
         didCopy = true
-    }
-}
-
-private struct MobileNotificationPairingView: View {
-    @Bindable var settings: SettingsStore
-    let onSendTest: () async -> Bool
-    @Environment(\.dismiss) private var dismiss
-    @State private var testState = TestState.idle
-
-    var body: some View {
-        VStack(spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Phone notifications")
-                        .font(.system(size: 20, weight: .semibold))
-                    Text("Experimental · powered by ntfy")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-
-            HStack(alignment: .center, spacing: 20) {
-                VStack(spacing: 7) {
-                    Label("Android · scan QR", systemImage: "qrcode")
-                        .font(.system(size: 12, weight: .semibold))
-                    if let image = androidQRCodeImage {
-                        Image(nsImage: image)
-                            .interpolation(.none)
-                            .resizable()
-                            .frame(width: 170, height: 170)
-                            .padding(10)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    Text("Opens the native ntfy app.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-
-                Divider()
-                    .frame(height: 220)
-
-                VStack(spacing: 12) {
-                    Label("iPhone · add topic", systemImage: "apple.logo")
-                        .font(.system(size: 12, weight: .semibold))
-                    Image(systemName: "iphone")
-                        .font(.system(size: 58, weight: .light))
-                        .foregroundStyle(.blue)
-                    Text("Open ntfy, tap +, then paste the private topic shown below.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Link("Get the iPhone app", destination: URL(string: "https://apps.apple.com/app/ntfy/id1625396347")!)
-                }
-                .frame(maxWidth: .infinity)
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Label("The ntfy mobile app is required", systemImage: "iphone.gen3")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("The page opened in Chrome is only a web viewer. It will not reliably notify you when the phone is asleep.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 8) {
-                pairingStep("1", "Install and open the native ntfy app on your phone.")
-                pairingStep("2", "Android: scan the QR and choose ntfy. If Chrome opens, copy the topic and add it with + inside the ntfy app.")
-                pairingStep("3", "iPhone: open ntfy, tap +, then paste the private topic below.")
-                pairingStep("4", "Android: in ntfy open Codex Pace Bar → Settings → enable Instant delivery, then allow the requested Android permission. iPhone: allow ntfy notifications when asked.")
-                pairingStep("5", "Send a test, lock the phone for 2 minutes, then send another test. Both should arrive before you unlock it.")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("If the second test arrives only after unlocking, Android is delaying ntfy. In ntfy enable Settings → Record logs and check that instant delivery stays active.")
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                Text(settings.mobileNotificationTopic)
-                    .font(.system(size: 11, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                Spacer()
-                Button("Copy") { copyTopic() }
-            }
-            .padding(10)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-
-            HStack {
-                Link("Android app", destination: URL(string: "https://play.google.com/store/apps/details?id=io.heckel.ntfy")!)
-                Link("iPhone app", destination: URL(string: "https://apps.apple.com/app/ntfy/id1625396347")!)
-                Button("New pairing code") {
-                    settings.regenerateMobileNotificationTopic()
-                    testState = .idle
-                }
-                Spacer()
-                testButton
-            }
-
-            Text("Treat the topic like a password: create a new pairing code if it was shared or shown in a screenshot. Only generic task status is sent by default. If you enable Phone notification details, the project name and duration are also sent; prompts, responses, code, and full paths stay on this Mac. The public ntfy relay handles the notification text and private topic.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(24)
-        .frame(width: 560)
-    }
-
-    @ViewBuilder
-    private var testButton: some View {
-        switch testState {
-        case .idle:
-            Button("Send test") { sendTest() }
-                .buttonStyle(.borderedProminent)
-        case .sending:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 80)
-        case .sent:
-            Label("Test sent", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .failed:
-            Button("Try again") { sendTest() }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-        }
-    }
-
-    private func pairingStep(_ number: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Text(number)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
-                .background(.blue, in: Circle())
-            Text(text)
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var androidQRCodeImage: NSImage? {
-        guard let url = MobileTaskNotificationService.androidSubscriptionURL(
-            topic: settings.mobileNotificationTopic
-        ) else { return nil }
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(url.absoluteString.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage else { return nil }
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
-        let representation = NSCIImageRep(ciImage: scaled)
-        let image = NSImage(size: representation.size)
-        image.addRepresentation(representation)
-        return image
-    }
-
-    private func copyTopic() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(settings.mobileNotificationTopic, forType: .string)
-    }
-
-    private func sendTest() {
-        testState = .sending
-        Task { @MainActor in
-            testState = await onSendTest() ? .sent : .failed
-        }
-    }
-
-    private enum TestState {
-        case idle
-        case sending
-        case sent
-        case failed
     }
 }
 
