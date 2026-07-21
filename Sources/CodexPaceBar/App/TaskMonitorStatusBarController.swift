@@ -11,6 +11,7 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
     private let freshnessPolicy = CodexTaskFreshnessPolicy()
     private var activeGoalThreadIDs = Set<String>()
     private var outsideClickMonitor: Any?
+    private var liveRefreshTimer: Timer?
 
     init(model: TaskMonitorViewModel) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -70,6 +71,8 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
     }
 
     func stop() {
+        liveRefreshTimer?.invalidate()
+        liveRefreshTimer = nil
         if let outsideClickMonitor {
             NSEvent.removeMonitor(outsideClickMonitor)
             self.outsideClickMonitor = nil
@@ -83,6 +86,7 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         model.reload()
+        startLiveRefreshTimer()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         startOutsideClickMonitor()
     }
@@ -99,7 +103,18 @@ final class TaskMonitorStatusBarController: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        liveRefreshTimer?.invalidate()
+        liveRefreshTimer = nil
         stopOutsideClickMonitor()
+    }
+
+    private func startLiveRefreshTimer() {
+        liveRefreshTimer?.invalidate()
+        liveRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.model.reload()
+            }
+        }
     }
 
     private func startOutsideClickMonitor() {
