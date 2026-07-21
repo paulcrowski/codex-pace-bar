@@ -253,7 +253,7 @@ struct UsageHistoryRepositoryTests {
             let loaded = repository(in: directory).load()
 
             #expect(loaded == persisted)
-            #expect(UsageHistorySeries.current(from: loaded, now: date(3_000)) == [second, third])
+            #expect(UsageHistorySeries.current(from: loaded, now: date(3_000)) == [first, second, third])
         }
     }
 
