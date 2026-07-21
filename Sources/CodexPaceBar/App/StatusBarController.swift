@@ -13,9 +13,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private let renderer = MenuBarIconRenderer()
     private let onRefresh: () -> Void
     private let onOpenSettings: () -> Void
-    private let onOpenTaskMonitor: () -> Void
     private let onQuit: () -> Void
-    private var taskMonitorModel: TaskMonitorViewModel?
     private let hostingController: NSHostingController<PopoverView>
     private var outsideClickMonitor: Any?
 
@@ -25,18 +23,14 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         history: UsageHistoryStore,
         onRefresh: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
-        onOpenTaskMonitor: @escaping () -> Void,
-        onQuit: @escaping () -> Void,
-        taskMonitorModel: TaskMonitorViewModel? = nil
+        onQuit: @escaping () -> Void
     ) {
         self.model = model
         self.settings = settings
         self.history = history
         self.onRefresh = onRefresh
         self.onOpenSettings = onOpenSettings
-        self.onOpenTaskMonitor = onOpenTaskMonitor
         self.onQuit = onQuit
-        self.taskMonitorModel = taskMonitorModel
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         self.hostingController = NSHostingController(
@@ -46,9 +40,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
                 history: history,
                 onRefresh: onRefresh,
                 onOpenSettings: onOpenSettings,
-                onOpenTaskMonitor: onOpenTaskMonitor,
-                onQuit: onQuit,
-                taskMonitorModel: taskMonitorModel
+                onQuit: onQuit
             )
         )
         super.init()
@@ -96,20 +88,6 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     func refreshIcon() {
         updateIcon()
-    }
-
-    func setTaskMonitorModel(_ model: TaskMonitorViewModel?) {
-        taskMonitorModel = model
-        hostingController.rootView = PopoverView(
-            model: self.model,
-            settings: settings,
-            history: history,
-            onRefresh: onRefresh,
-            onOpenSettings: onOpenSettings,
-            onOpenTaskMonitor: onOpenTaskMonitor,
-            onQuit: onQuit,
-            taskMonitorModel: taskMonitorModel
-        )
     }
 
     private func startOutsideClickMonitor() {

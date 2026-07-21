@@ -56,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             history: history,
             onRefresh: { [weak self] in self?.coordinator.requestRefresh() },
             onOpenSettings: { [weak self] in self?.settingsWindowController?.show() },
-            onOpenTaskMonitor: { [weak self] in self?.showTaskMonitor() },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
 
@@ -185,9 +184,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ensureTaskMonitorModel() -> TaskMonitorViewModel? {
         if let taskMonitorViewModel {
-            statusBarController?.setTaskMonitorModel(
-                settings.mainTaskSummaryEnabled || uiProofMode ? taskMonitorViewModel : nil
-            )
             return taskMonitorViewModel
         }
 
@@ -217,9 +213,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 focusLoadEnabled: settings.focusLoadEnabled
             )
             taskMonitorViewModel = model
-            statusBarController?.setTaskMonitorModel(
-                settings.mainTaskSummaryEnabled || uiProofMode ? model : nil
-            )
             return model
         } catch {
             NSLog("Codex Pace Bar task monitor could not start: \(error.localizedDescription)")
@@ -295,7 +288,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        statusBarController?.setTaskMonitorModel(nil)
         guard taskMonitorStatusBarController == nil else {
             return
         }
@@ -306,7 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         taskMonitorCoordinator?.stop()
         taskMonitorCoordinator = nil
         taskMonitorViewModel = nil
-        statusBarController?.setTaskMonitorModel(nil)
     }
 
     private func stopTaskMonitor() {
