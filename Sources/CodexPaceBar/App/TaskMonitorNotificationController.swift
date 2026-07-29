@@ -7,8 +7,7 @@ import Foundation
 final class TaskMonitorNotificationController {
     private let notificationCenter: UNUserNotificationCenter
     private let mobileService: MobileTaskNotificationService
-    private var deliveredKeys = Set<String>()
-    private var inFlightLocalKeys = Set<String>()
+    private var pendingLocalWaitingAlerts: [String: PendingLocalWaitingAlert] = [:]
     private var mobileBaselinePrepared = false
     private var previousMobileEnabled = false
     private var previousMobileTopic = ""
@@ -70,6 +69,8 @@ final class TaskMonitorNotificationController {
     func resetMobileBaseline() {
         mobileBaselinePrepared = false
         mobileService.discardPendingCompletionBatch()
+        mobileService.discardPendingWaitingAlerts()
+        cancelAllPendingLocalWaitingAlerts()
     }
 
     func sendMobileTest(topic: String) async -> Bool {
@@ -77,13 +78,38 @@ final class TaskMonitorNotificationController {
     }
 
     private func deliverLocalNotificationsIfNeeded(for tasks: [CodexTaskActivity], now: Date) {
-        for task in tasks where task.status == .needsApproval || task.status == .needsInput {
-            let key = "\(task.id):\(task.status.rawValue):\(task.lastEventAt?.timeIntervalSince1970 ?? 0)"
-            guard !deliveredKeys.contains(key),
-                  !inFlightLocalKeys.contains(key),
-                  now.timeIntervalSince(task.lastEventAt ?? .distantPast) < 5 * 60
-            else { continue }
-            inFlightLocalKeys.insert(key)
+        let waitingTasks = tasks.filter { $0.status.isWaitingForUser }
+        let waitingIDs = Set(waitingTasks.map(\.id))
+
+        let finishedWaitingIDs = pendingLocalWaitingAlerts.keys.filter { !waitingIDs.contains($0) }
+        for taskID in finishedWaitingIDs {
+            guard let pending = pendingLocalWaitingAlerts[taskID] else { continue }
+            notificationCenter.removePendingNotificationRequests(withIdentifiers: [pending.requestIdentifier])
+            pendingLocalWaitingAlerts.removeValue(forKey: taskID)
+        }
+
+        for task in waitingTasks {
+            let waitingStartedAt = task.waitingStartedAt ?? task.lastEventAt ?? now
+            let episodeKey = "\(task.id):waiting:\(waitingStartedAt.timeIntervalSince1970)"
+            if let pending = pendingLocalWaitingAlerts[task.id] {
+                if pending.episodeKey == episodeKey {
+                    continue
+                }
+                notificationCenter.removePendingNotificationRequests(
+                    withIdentifiers: [pending.requestIdentifier]
+                )
+                pendingLocalWaitingAlerts.removeValue(forKey: task.id)
+            }
+
+            let age = now.timeIntervalSince(waitingStartedAt)
+            guard age >= -30, age <= MobileTaskNotificationService.maximumEventAge else { continue }
+
+            let delay = max(0, MobileTaskNotificationService.waitingNotificationDelay - age)
+            let requestIdentifier = "codex-task-needs-user-\(task.id)"
+            pendingLocalWaitingAlerts[task.id] = PendingLocalWaitingAlert(
+                episodeKey: episodeKey,
+                requestIdentifier: requestIdentifier
+            )
             Task { [notificationCenter] in
                 let settings = await notificationCenter.notificationSettings()
                 let allowed: Bool
@@ -94,27 +120,67 @@ final class TaskMonitorNotificationController {
                 default: allowed = false
                 }
                 guard allowed else {
-                    _ = await MainActor.run { self.inFlightLocalKeys.remove(key) }
+                    _ = await MainActor.run { self.removePendingLocalWaitingAlert(
+                        taskID: task.id,
+                        episodeKey: episodeKey,
+                        cancelRequest: false
+                    ) }
                     return
                 }
+                guard await MainActor.run(body: {
+                    self.pendingLocalWaitingAlerts[task.id]?.episodeKey == episodeKey
+                }) else { return }
+
                 let content = UNMutableNotificationContent()
                 content.title = "Codex needs you"
                 content.body = task.workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent }
                     ?? "A task is waiting for a response."
+                let trigger = delay > 0
+                    ? UNTimeIntervalNotificationTrigger(timeInterval: max(0.1, delay), repeats: false)
+                    : nil
                 do {
                     try await notificationCenter.add(UNNotificationRequest(
-                    identifier: "codex-task-needs-user-\(UUID().uuidString)",
-                    content: content,
-                    trigger: nil
+                        identifier: requestIdentifier,
+                        content: content,
+                        trigger: trigger
                     ))
-                    await MainActor.run {
-                        self.inFlightLocalKeys.remove(key)
-                        self.deliveredKeys.insert(key)
-                    }
                 } catch {
-                    _ = await MainActor.run { self.inFlightLocalKeys.remove(key) }
+                    _ = await MainActor.run { self.removePendingLocalWaitingAlert(
+                        taskID: task.id,
+                        episodeKey: episodeKey,
+                        cancelRequest: false
+                    ) }
                 }
             }
         }
+    }
+
+    private func removePendingLocalWaitingAlert(
+        taskID: String,
+        episodeKey: String,
+        cancelRequest: Bool
+    ) {
+        guard let pending = pendingLocalWaitingAlerts[taskID],
+              pending.episodeKey == episodeKey
+        else { return }
+        pendingLocalWaitingAlerts.removeValue(forKey: taskID)
+        if cancelRequest {
+            notificationCenter.removePendingNotificationRequests(
+                withIdentifiers: [pending.requestIdentifier]
+            )
+        }
+    }
+
+    private func cancelAllPendingLocalWaitingAlerts() {
+        let identifiers = pendingLocalWaitingAlerts.values.map(\.requestIdentifier)
+        if !identifiers.isEmpty {
+            notificationCenter.removePendingNotificationRequests(withIdentifiers: identifiers)
+        }
+        pendingLocalWaitingAlerts.removeAll()
+    }
+
+    private struct PendingLocalWaitingAlert {
+        let episodeKey: String
+        let requestIdentifier: String
     }
 }

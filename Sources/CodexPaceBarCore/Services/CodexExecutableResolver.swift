@@ -74,9 +74,10 @@ public struct CodexExecutableResolver {
     }
 
     private func fixedCandidatesBeforeMise() -> [URL] {
-        systemCandidates + [
-            homeDirectory.appendingPathComponent(".local/bin/codex")
-        ]
+        // Finder launches menu-bar apps with a minimal PATH. Prefer the native
+        // standalone install before Homebrew's Node shim so the child process
+        // does not depend on Finder knowing where `node` lives.
+        [homeDirectory.appendingPathComponent(".local/bin/codex")] + systemCandidates
     }
 
     private func fixedCandidatesAfterMise() -> [URL] {

@@ -77,6 +77,24 @@ struct CodexExecutableResolverTests {
     }
 
     @Test
+    func prefersStandaloneUserInstallBeforeSystemCandidates() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let standalone = root.appendingPathComponent(".local/bin/codex")
+        let systemCandidate = root.appendingPathComponent("opt/homebrew/bin/codex")
+        try makeExecutable(at: standalone)
+        try makeExecutable(at: systemCandidate)
+
+        let resolver = CodexExecutableResolver(
+            pathEnvironment: "",
+            homeDirectory: root,
+            systemCandidates: [systemCandidate]
+        )
+
+        #expect(try resolver.resolve(configuredPath: nil).standardizedFileURL == standalone.standardizedFileURL)
+    }
+
+    @Test
     func returnsErrorWhenExecutableIsMissing() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

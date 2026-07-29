@@ -98,11 +98,19 @@ struct MobileTaskNotificationTests {
         let now = Date(timeIntervalSince1970: 3_000_000)
         let fresh = task(id: "fresh", status: .needsApproval, eventAt: now)
 
-        let first = MobileTaskNotificationService(defaults: defaults, sender: sender)
+        let first = MobileTaskNotificationService(
+            defaults: defaults,
+            waitingNotificationDelay: 0,
+            sender: sender
+        )
         first.prime(with: [])
         await first.notifyIfNeeded(for: [fresh], enabled: true, topic: "private-topic", now: now)
 
-        let second = MobileTaskNotificationService(defaults: defaults, sender: sender)
+        let second = MobileTaskNotificationService(
+            defaults: defaults,
+            waitingNotificationDelay: 0,
+            sender: sender
+        )
         second.prime(with: [])
         await second.notifyIfNeeded(for: [fresh], enabled: true, topic: "private-topic", now: now)
 
@@ -243,13 +251,14 @@ struct MobileTaskNotificationTests {
     }
 
     @Test
-    func silentModeStillSendsNeedsYouImmediately() async throws {
+    func silentModeDelaysNeedsYouUntilWaitingPersists() async throws {
         let defaults = makeDefaults()
         defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
         var requests: [URLRequest] = []
         let service = MobileTaskNotificationService(
             defaults: defaults,
-            quietInterval: 60
+            quietInterval: 60,
+            waitingNotificationDelay: 0.03
         ) { request in
             requests.append(request)
             return try successResponse(for: request)
@@ -265,8 +274,41 @@ struct MobileTaskNotificationTests {
             now: now
         )
 
+        #expect(requests.isEmpty)
+        try await Task.sleep(for: .milliseconds(60))
         #expect(requests.count == 1)
         #expect(requests.first?.value(forHTTPHeaderField: "Title") == "Codex needs you")
+    }
+
+    @Test
+    func transientWaitingStateIsCancelledBeforeDelayExpires() async throws {
+        let defaults = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+        var requests: [URLRequest] = []
+        let service = MobileTaskNotificationService(
+            defaults: defaults,
+            waitingNotificationDelay: 0.05
+        ) { request in
+            requests.append(request)
+            return try successResponse(for: request)
+        }
+        let now = Date(timeIntervalSince1970: 8_500_000)
+        service.prime(with: [])
+
+        await service.notifyIfNeeded(
+            for: [task(id: "approval-loop", status: .needsApproval, eventAt: now)],
+            enabled: true,
+            topic: "private-topic",
+            now: now
+        )
+        await service.notifyIfNeeded(
+            for: [task(id: "approval-loop", status: .working, eventAt: now.addingTimeInterval(4))],
+            enabled: true,
+            topic: "private-topic",
+            now: now.addingTimeInterval(4)
+        )
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(requests.isEmpty)
     }
 
     @Test
@@ -346,7 +388,12 @@ struct MobileTaskNotificationTests {
         UserDefaults(suiteName: defaultsSuiteName)!
     }
 
-    private func task(id: String, status: CodexTaskStatus, eventAt: Date) -> CodexTaskActivity {
+    private func task(
+        id: String,
+        status: CodexTaskStatus,
+        eventAt: Date,
+        waitingStartedAt: Date? = nil
+    ) -> CodexTaskActivity {
         CodexTaskActivity(
             sessionID: "session-\(id)",
             turnID: "turn-\(id)",
@@ -358,7 +405,8 @@ struct MobileTaskNotificationTests {
             completedAt: status == .completed ? eventAt : nil,
             duration: status == .completed ? 60 : nil,
             timeToFirstToken: nil,
-            lastEventAt: eventAt
+            lastEventAt: eventAt,
+            waitingStartedAt: status.isWaitingForUser ? (waitingStartedAt ?? eventAt) : nil
         )
     }
 

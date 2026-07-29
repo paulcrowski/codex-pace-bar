@@ -6,6 +6,7 @@ public final class MobileTaskNotificationService {
     public typealias RequestSender = (URLRequest) async throws -> (Data, URLResponse)
 
     public static let maximumEventAge: TimeInterval = 5 * 60
+    public static let waitingNotificationDelay: TimeInterval = 30
     public static let defaultQuietInterval: TimeInterval = 90
     public static let requestTimeout: TimeInterval = 10
     public static let maximumSendAttempts = 3
@@ -19,8 +20,10 @@ public final class MobileTaskNotificationService {
     private let defaults: UserDefaults
     private let sender: RequestSender
     private let quietInterval: TimeInterval
+    private let waitingNotificationDelay: TimeInterval
     private var deliveredKeys: Set<String>
     private var deliveredOrder: [String]
+    private var pendingWaitingAlerts: [String: PendingWaitingAlert] = [:]
     private var inFlightKeys = Set<String>()
     private var pendingCompletionTasks: [String: CodexTaskActivity] = [:]
     private var latestQuietTasks: [CodexTaskActivity] = []
@@ -33,6 +36,7 @@ public final class MobileTaskNotificationService {
     public init(
         defaults: UserDefaults = .standard,
         quietInterval: TimeInterval = MobileTaskNotificationService.defaultQuietInterval,
+        waitingNotificationDelay: TimeInterval = MobileTaskNotificationService.waitingNotificationDelay,
         sender: @escaping RequestSender = { request in
             try await URLSession.shared.data(for: request)
         }
@@ -40,6 +44,7 @@ public final class MobileTaskNotificationService {
         self.defaults = defaults
         self.sender = sender
         self.quietInterval = max(0, quietInterval)
+        self.waitingNotificationDelay = max(0, waitingNotificationDelay)
         let storedKeys = defaults.stringArray(forKey: Self.deliveredKeysDefaultsKey) ?? []
         self.deliveredKeys = Set(storedKeys)
         self.deliveredOrder = storedKeys
@@ -50,6 +55,7 @@ public final class MobileTaskNotificationService {
         goals: [CodexGoalActivity] = [],
         swarms: [CodexSwarmActivity] = []
     ) {
+        discardPendingWaitingAlerts()
         let keys = tasks
             .filter { message(for: $0) != nil }
             .sorted { eventDate(for: $0) < eventDate(for: $1) }
@@ -70,17 +76,19 @@ public final class MobileTaskNotificationService {
         now: Date = Date()
     ) async {
         guard enabled, let publishURL = Self.publishURL(topic: topic) else {
+            discardPendingWaitingAlerts()
             discardPendingCompletionBatch()
             return
         }
 
+        await reconcileWaitingAlerts(
+            from: tasks,
+            to: publishURL,
+            includeDetails: includeDetails,
+            now: now
+        )
+
         if silentGoalsAndSwarmsEnabled {
-            await deliverImmediateWaitingAlerts(
-                from: tasks,
-                to: publishURL,
-                includeDetails: includeDetails,
-                now: now
-            )
             await deliverNativeTerminalAlerts(
                 goals: goals,
                 swarms: swarms,
@@ -130,25 +138,100 @@ public final class MobileTaskNotificationService {
         now: Date
     ) async {
         for task in tasks.sorted(by: { eventDate(for: $0) < eventDate(for: $1) }) {
+            guard !task.status.isWaitingForUser else { continue }
             guard let message = message(for: task, includeDetails: includeDetails) else { continue }
             await deliver(message, for: task, to: publishURL, now: now)
         }
     }
 
-    private func deliverImmediateWaitingAlerts(
+    private func reconcileWaitingAlerts(
         from tasks: [CodexTaskActivity],
         to publishURL: URL,
         includeDetails: Bool,
         now: Date
     ) async {
-        for task in tasks where task.status.isWaitingForUser {
-            guard let message = message(for: task, includeDetails: includeDetails) else { continue }
-            await deliver(message, for: task, to: publishURL, now: now)
+        let waitingTasks = tasks.filter { $0.status.isWaitingForUser }
+        let waitingIDs = Set(waitingTasks.map(\.id))
+
+        let finishedWaitingIDs = pendingWaitingAlerts.keys.filter { !waitingIDs.contains($0) }
+        for taskID in finishedWaitingIDs {
+            guard let pending = pendingWaitingAlerts[taskID] else { continue }
+            pending.deliveryTask.cancel()
+            pendingWaitingAlerts.removeValue(forKey: taskID)
+        }
+
+        for task in waitingTasks {
+            let episodeKey = waitingEventKey(for: task)
+            if deliveredKeys.contains(episodeKey) {
+                continue
+            }
+            if let pending = pendingWaitingAlerts[task.id] {
+                if pending.episodeKey == episodeKey {
+                    continue
+                }
+                pending.deliveryTask.cancel()
+                pendingWaitingAlerts.removeValue(forKey: task.id)
+            }
+
+            let waitingStartedAt = task.waitingStartedAt ?? eventDate(for: task)
+            let age = now.timeIntervalSince(waitingStartedAt)
+            guard age >= -30, age <= Self.maximumEventAge else { continue }
+
+            let delay = max(0, waitingNotificationDelay - age)
+            let fireDate = now.addingTimeInterval(delay)
+            if delay == 0 {
+                guard let message = message(for: task, includeDetails: includeDetails) else { continue }
+                await deliver(
+                    message,
+                    key: episodeKey,
+                    occurredAt: waitingStartedAt,
+                    to: publishURL,
+                    now: fireDate
+                )
+                continue
+            }
+
+            let deliveryTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(
+                        for: .milliseconds(Int64(max(1, (delay * 1_000).rounded())))
+                    )
+                } catch {
+                    return
+                }
+
+                guard let self,
+                      self.pendingWaitingAlerts[task.id]?.episodeKey == episodeKey,
+                      let message = self.message(for: task, includeDetails: includeDetails)
+                else { return }
+
+                await self.deliver(
+                    message,
+                    key: episodeKey,
+                    occurredAt: waitingStartedAt,
+                    to: publishURL,
+                    now: fireDate
+                )
+                if self.pendingWaitingAlerts[task.id]?.episodeKey == episodeKey {
+                    self.pendingWaitingAlerts.removeValue(forKey: task.id)
+                }
+            }
+            pendingWaitingAlerts[task.id] = PendingWaitingAlert(
+                episodeKey: episodeKey,
+                deliveryTask: deliveryTask
+            )
         }
     }
 
     private func deliver(_ message: Message, for task: CodexTaskActivity, to url: URL, now: Date) async {
         await deliver(message, key: eventKey(for: task), occurredAt: eventDate(for: task), to: url, now: now)
+    }
+
+    public func discardPendingWaitingAlerts() {
+        for pending in pendingWaitingAlerts.values {
+            pending.deliveryTask.cancel()
+        }
+        pendingWaitingAlerts.removeAll()
     }
 
     private func deliver(
@@ -523,8 +606,16 @@ public final class MobileTaskNotificationService {
     }
 
     private func eventKey(for task: CodexTaskActivity) -> String {
+        if task.status.isWaitingForUser {
+            return waitingEventKey(for: task)
+        }
         let timestamp = eventDate(for: task).timeIntervalSince1970
         return "\(task.id):\(task.status.rawValue):\(timestamp)"
+    }
+
+    private func waitingEventKey(for task: CodexTaskActivity) -> String {
+        let timestamp = (task.waitingStartedAt ?? eventDate(for: task)).timeIntervalSince1970
+        return "\(task.id):waiting:\(timestamp)"
     }
 
     private func goalEventKey(_ goal: CodexGoalActivity) -> String {
@@ -554,5 +645,10 @@ public final class MobileTaskNotificationService {
         let body: String
         let priority: String
         let tags: String
+    }
+
+    private struct PendingWaitingAlert {
+        let episodeKey: String
+        let deliveryTask: Task<Void, Never>
     }
 }
