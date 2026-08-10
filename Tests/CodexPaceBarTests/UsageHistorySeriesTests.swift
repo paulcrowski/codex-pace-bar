@@ -78,6 +78,36 @@ struct UsageHistorySeriesTests {
     }
 
     @Test
+    func effectiveUsageClampsSameWindowDropAndRecoveryWithoutChangingRawSamples() {
+        let resetAt = date(10_000)
+        let samples = [
+            sample(at: date(1_000), used: 42, resetAt: resetAt),
+            sample(at: date(2_000), used: 27, resetAt: resetAt),
+            sample(at: date(3_000), used: 42, resetAt: resetAt)
+        ]
+
+        let effective = UsageHistorySeries.effective(from: samples)
+
+        #expect(effective.map(\.usedPercent) == [42, 42, 42])
+        #expect(samples.map(\.usedPercent) == [42, 27, 42])
+    }
+
+    @Test
+    func effectiveUsageAcceptsDropWhenNewWindowIsConfirmed() {
+        let oldResetAt = date(100_000)
+        let samples = [
+            sample(at: date(1_000), used: 65, resetAt: oldResetAt),
+            sample(
+                at: date(2_000),
+                used: 4,
+                resetAt: oldResetAt.addingTimeInterval(7 * 24 * 60 * 60)
+            )
+        ]
+
+        #expect(UsageHistorySeries.effective(from: samples).map(\.usedPercent) == [65, 4])
+    }
+
+    @Test
     func usageDropWithAdvancedResetMetadataStartsNewSeriesBeforeDeadline() {
         let now = date(4_000)
         let oldResetAt = date(100_000)

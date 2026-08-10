@@ -40,6 +40,35 @@ struct RefreshCoordinatorTests {
     }
 
     @Test
+    func sameWindowDecreaseRemainsRawButDoesNotReduceDisplayedUsage() async throws {
+        let model = AppModel()
+        let settings = SettingsStore(defaults: makeDefaults())
+        let history = UsageHistoryStore(fileURL: temporaryHistoryURL())
+        let resetAt = Date(timeIntervalSince1970: 10_000)
+        history.record(
+            window: makeFetchResult(usedPercent: 42, resetAt: resetAt).selection.window,
+            at: Date(timeIntervalSince1970: 1_000)
+        )
+        let fetcher = MockFetcher(outcome: .success(makeFetchResult(usedPercent: 27, resetAt: resetAt)))
+        let coordinator = makeCoordinator(
+            model: model,
+            settings: settings,
+            history: history,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 2_000)),
+            fetchers: [fetcher]
+        )
+
+        coordinator.requestRefresh()
+        try await settle()
+
+        #expect(history.samples.map(\.usedPercent) == [42, 27])
+        #expect(history.effectiveSamples.map(\.usedPercent) == [42, 42])
+        #expect(history.currentSamples.map(\.usedPercent) == [42, 42])
+        #expect(model.snapshot?.actualUsedPercent == 42)
+        #expect(model.selectedWindow?.usedPercent == 42)
+    }
+
+    @Test
     func fastRefreshRequestsAreQueuedOnce() async throws {
         let model = AppModel()
         let settings = SettingsStore(defaults: makeDefaults())

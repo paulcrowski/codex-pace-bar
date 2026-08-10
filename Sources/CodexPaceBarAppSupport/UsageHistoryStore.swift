@@ -20,10 +20,15 @@ public final class UsageHistoryStore {
     }
 
     public var currentSamples: [UsageSample] {
-        UsageHistorySeries.current(from: samples, now: Date())
+        UsageHistorySeries.current(from: effectiveSamples, now: Date())
     }
 
-    public func record(window: CodexLimitWindow, at timestamp: Date) {
+    public var effectiveSamples: [UsageSample] {
+        UsageHistorySeries.effective(from: samples)
+    }
+
+    @discardableResult
+    public func record(window: CodexLimitWindow, at timestamp: Date) -> CodexLimitWindow {
         let sample = UsageSample(
             timestamp: timestamp,
             usedPercent: window.usedPercent,
@@ -31,12 +36,25 @@ public final class UsageHistoryStore {
             limitId: window.limitId
         )
 
+        let samplesForEffectiveUsage: [UsageSample]
         do {
             samples = try repository.appending(sample, to: samples)
             lastPersistenceError = nil
+            samplesForEffectiveUsage = samples
         } catch {
             lastPersistenceError = error.localizedDescription
+            samplesForEffectiveUsage = samples + [sample]
         }
+
+        let effectiveUsedPercent = UsageHistorySeries.effective(from: samplesForEffectiveUsage).last?.usedPercent
+            ?? window.usedPercent
+        return CodexLimitWindow(
+            limitId: window.limitId,
+            source: window.source,
+            usedPercent: effectiveUsedPercent,
+            windowDurationMins: window.windowDurationMins,
+            resetsAt: window.resetsAt
+        )
     }
 
     private static func defaultFileURL(fileManager: FileManager) -> URL {

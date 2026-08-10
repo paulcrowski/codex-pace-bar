@@ -153,14 +153,14 @@ public final class RefreshCoordinator {
             let fetch = try await rateLimitService.fetchWeeklyLimit()
             try Task.checkCancellation()
             let now = clock.now
-            history.record(window: fetch.selection.window, at: now)
+            let effectiveWindow = history.record(window: fetch.selection.window, at: now)
             let forecast = UsageForecaster.forecast(
-                samples: history.samples,
+                samples: history.effectiveSamples,
                 now: now,
                 mode: settings.historyBasedForecastEnabled ? .historyBased : .recentPace
             )
             let snapshot = PaceCalculator.snapshot(
-                for: fetch.selection.window,
+                for: effectiveWindow,
                 now: now,
                 fetchedAt: now,
                 previousState: model.snapshot?.state,
@@ -168,13 +168,13 @@ public final class RefreshCoordinator {
             )
 
             model.apply(
-                window: fetch.selection.window,
+                window: effectiveWindow,
                 snapshot: snapshot,
                 forecast: forecast,
                 debugInfo: fetch.debugInfo
             )
             notifyIfNeeded(snapshot: snapshot, now: now)
-            scheduleResetTimer(for: fetch.selection.window.resetsAt)
+            scheduleResetTimer(for: effectiveWindow.resetsAt)
         } catch {
             guard !Task.isCancelled else {
                 return
