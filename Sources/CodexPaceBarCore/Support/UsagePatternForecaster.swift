@@ -3,6 +3,7 @@ import Foundation
 enum UsagePatternForecaster {
     static let minimumHistoryDuration: TimeInterval = 7 * 24 * 60 * 60
     static let minimumObservedDuration: TimeInterval = 24 * 60 * 60
+    static let minimumAdaptiveDuration: TimeInterval = 24 * 60 * 60
     static let maximumObservationInterval: TimeInterval = 90 * 60
 
     static func forecast(
@@ -62,13 +63,38 @@ enum UsagePatternForecaster {
         let rates = buckets.mapValues { totals in
             totals.observedHours > 0 ? totals.usage / totals.observedHours : 0
         }
+        let rateScale = adaptedRateScale(
+            rates: rates,
+            samples: samples,
+            latest: latest,
+            now: now,
+            calendar: calendar
+        )
         return projectedForecast(
             rates: rates,
+            rateScale: rateScale,
             usedPercent: latest.usedPercent,
             now: now,
             resetAt: latest.resetAt,
             calendar: calendar
         )
+    }
+
+    static func adaptedFutureUsage(
+        historicalFutureUsage: Double,
+        currentObservedUsage: Double,
+        observedDuration: TimeInterval,
+        remainingDuration: TimeInterval
+    ) -> Double {
+        guard observedDuration > 0, remainingDuration > 0 else {
+            return historicalFutureUsage
+        }
+
+        let currentRate = max(0, currentObservedUsage) / observedDuration
+        let currentFutureUsage = currentRate * remainingDuration
+        let currentWeight = observedDuration / (observedDuration + remainingDuration)
+        return historicalFutureUsage
+            + (currentFutureUsage - historicalFutureUsage) * currentWeight
     }
 
     private static func add(
@@ -101,22 +127,26 @@ enum UsagePatternForecaster {
 
     private static func projectedForecast(
         rates: [HourBucket: Double],
+        rateScale: Double,
         usedPercent: Double,
         now: Date,
         resetAt: Date,
         calendar: Calendar
     ) -> UsageForecast {
         let initialRemaining = max(0, 100 - usedPercent)
+        var projection = [UsageForecastPoint(timestamp: now, usedPercent: usedPercent)]
         guard initialRemaining > 0 else {
             return UsageForecast(
                 ratePercentagePointsPerHour: 0,
                 exhaustionAt: now,
-                resetAt: resetAt
+                resetAt: resetAt,
+                projection: projection
             )
         }
 
         var remaining = initialRemaining
         var projectedUsage = 0.0
+        var projectedUsedPercent = usedPercent
         var cursor = now
 
         while cursor < resetAt {
@@ -125,22 +155,29 @@ enum UsagePatternForecaster {
             }
             let segmentEnd = min(resetAt, hourInterval.end)
             let segmentHours = segmentEnd.timeIntervalSince(cursor) / 3600
-            let rate = rates[HourBucket(date: cursor, calendar: calendar), default: 0]
+            let rate = rates[HourBucket(date: cursor, calendar: calendar), default: 0] * rateScale
             let segmentUsage = rate * segmentHours
 
             if rate > 0, segmentUsage >= remaining {
                 let exhaustionAt = cursor.addingTimeInterval(remaining / rate * 3600)
                 let elapsedHours = exhaustionAt.timeIntervalSince(now) / 3600
                 let effectiveRate = elapsedHours > 0 ? initialRemaining / elapsedHours : rate
+                projection.append(UsageForecastPoint(timestamp: exhaustionAt, usedPercent: 100))
                 return UsageForecast(
                     ratePercentagePointsPerHour: effectiveRate,
                     exhaustionAt: exhaustionAt,
-                    resetAt: resetAt
+                    resetAt: resetAt,
+                    projection: projection
                 )
             }
 
             remaining -= segmentUsage
             projectedUsage += segmentUsage
+            projectedUsedPercent += segmentUsage
+            projection.append(UsageForecastPoint(
+                timestamp: segmentEnd,
+                usedPercent: projectedUsedPercent
+            ))
             cursor = segmentEnd
         }
 
@@ -148,7 +185,8 @@ enum UsagePatternForecaster {
             return UsageForecast(
                 ratePercentagePointsPerHour: 0,
                 exhaustionAt: .distantFuture,
-                resetAt: resetAt
+                resetAt: resetAt,
+                projection: projection
             )
         }
 
@@ -157,8 +195,73 @@ enum UsagePatternForecaster {
         return UsageForecast(
             ratePercentagePointsPerHour: effectiveRate,
             exhaustionAt: now.addingTimeInterval(initialRemaining / effectiveRate * 3600),
-            resetAt: resetAt
+            resetAt: resetAt,
+            projection: projection
         )
+    }
+
+    private static func adaptedRateScale(
+        rates: [HourBucket: Double],
+        samples: [UsageSample],
+        latest: UsageSample,
+        now: Date,
+        calendar: Calendar
+    ) -> Double {
+        let currentSeries = UsageHistorySeries.current(from: samples, now: now)
+        let currentWindow = currentSeries.reversed().prefix { sample in
+            abs(sample.resetAt.timeIntervalSince(latest.resetAt))
+                < UsageHistorySeries.minimumScheduledResetAdvance
+        }
+        guard let first = currentWindow.last else {
+            return 1
+        }
+
+        let observedDuration = latest.timestamp.timeIntervalSince(first.timestamp)
+        let remainingDuration = latest.resetAt.timeIntervalSince(now)
+        let remainingUsage = max(0, 100 - latest.usedPercent)
+        let historicalFutureUsage = projectedUsage(
+            rates: rates,
+            from: now,
+            to: latest.resetAt,
+            calendar: calendar
+        )
+        guard observedDuration >= minimumAdaptiveDuration,
+              remainingDuration > 0,
+              remainingUsage > 0,
+              historicalFutureUsage > 0
+        else {
+            return 1
+        }
+
+        let adaptedUsage = adaptedFutureUsage(
+            historicalFutureUsage: min(historicalFutureUsage, remainingUsage),
+            currentObservedUsage: latest.usedPercent - first.usedPercent,
+            observedDuration: observedDuration,
+            remainingDuration: remainingDuration
+        )
+        return min(remainingUsage, max(0, adaptedUsage)) / historicalFutureUsage
+    }
+
+    private static func projectedUsage(
+        rates: [HourBucket: Double],
+        from start: Date,
+        to end: Date,
+        calendar: Calendar
+    ) -> Double {
+        var usage = 0.0
+        var cursor = start
+
+        while cursor < end {
+            guard let hourInterval = calendar.dateInterval(of: .hour, for: cursor) else {
+                break
+            }
+            let segmentEnd = min(end, hourInterval.end)
+            let segmentHours = segmentEnd.timeIntervalSince(cursor) / 3600
+            usage += rates[HourBucket(date: cursor, calendar: calendar), default: 0] * segmentHours
+            cursor = segmentEnd
+        }
+
+        return usage
     }
 
     private static func recencyWeight(for date: Date, now: Date) -> Double {
@@ -176,11 +279,11 @@ enum UsagePatternForecaster {
     }
 
     private struct HourBucket: Hashable {
-        let weekday: Int
+        let isWeekend: Bool
         let hour: Int
 
         init(date: Date, calendar: Calendar) {
-            weekday = calendar.component(.weekday, from: date)
+            isWeekend = calendar.isDateInWeekend(date)
             hour = calendar.component(.hour, from: date)
         }
     }

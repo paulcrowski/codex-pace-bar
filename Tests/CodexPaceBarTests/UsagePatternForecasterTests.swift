@@ -11,6 +11,42 @@ struct UsagePatternForecasterTests {
     }
 
     @Test
+    func adaptedFutureUsageKeepsHistoryWhenCurrentPaceIsSimilar() {
+        let adapted = UsagePatternForecaster.adaptedFutureUsage(
+            historicalFutureUsage: 30,
+            currentObservedUsage: 10,
+            observedDuration: 2 * hour,
+            remainingDuration: 6 * hour
+        )
+
+        #expect(adapted == 30)
+    }
+
+    @Test
+    func adaptedFutureUsageIncreasesWhenCurrentPaceIsHigherThanHistory() {
+        let adapted = UsagePatternForecaster.adaptedFutureUsage(
+            historicalFutureUsage: 10,
+            currentObservedUsage: 10,
+            observedDuration: 2 * hour,
+            remainingDuration: 6 * hour
+        )
+
+        #expect(adapted == 15)
+    }
+
+    @Test
+    func adaptedFutureUsageDecreasesWhenCurrentPaceIsLowerThanHistory() {
+        let adapted = UsagePatternForecaster.adaptedFutureUsage(
+            historicalFutureUsage: 50,
+            currentObservedUsage: 10,
+            observedDuration: 2 * hour,
+            remainingDuration: 6 * hour
+        )
+
+        #expect(adapted == 45)
+    }
+
+    @Test
     func predictsExactExhaustionFromThirtyDaysOfHourlyPatterns() throws {
         let now = date("2026-07-13T09:00:00Z")
         let resetAt = now.addingTimeInterval(7 * day)
@@ -73,6 +109,102 @@ struct UsagePatternForecasterTests {
 
         #expect(abs(forecast.ratePercentagePointsPerHour - 2.2) < 0.000_001)
         #expect(!forecast.willRunOutBeforeReset)
+    }
+
+    @Test
+    func projectionPreservesRecurringNightAndWeekendPauses() throws {
+        let now = date("2026-07-17T20:00:00Z")
+        let resetAt = now.addingTimeInterval(62 * hour)
+        var hourlyRates = Array(repeating: 0.0, count: 62)
+        hourlyRates[0] = 2
+        hourlyRates[1] = 2
+        hourlyRates[60] = 3
+        hourlyRates[61] = 3
+        let samples = repeatingPattern(
+            now: now,
+            weeksAgo: [4, 3, 2, 1],
+            startOffsetHours: 0,
+            hourlyRates: hourlyRates,
+            currentUsed: 10,
+            currentResetAt: resetAt
+        )
+
+        let forecast = try #require(historyForecast(samples, now: now))
+
+        #expect(forecast.projection.count == 63)
+        #expect(forecast.projection[2] == UsageForecastPoint(
+            timestamp: now.addingTimeInterval(2 * hour),
+            usedPercent: 14
+        ))
+        #expect(forecast.projection[60] == UsageForecastPoint(
+            timestamp: now.addingTimeInterval(60 * hour),
+            usedPercent: 14
+        ))
+        #expect(forecast.projection.last == UsageForecastPoint(
+            timestamp: resetAt,
+            usedPercent: 20
+        ))
+    }
+
+    @Test
+    func averagesWorkdaysByHourAndKeepsWeekendSeparate() throws {
+        let now = date("2026-07-13T09:00:00Z")
+        let resetAt = now.addingTimeInterval(7 * day)
+        let oldStart = now.addingTimeInterval(-8 * day)
+        let oldReset = oldStart.addingTimeInterval(7 * day)
+        var samples = [
+            sample(at: oldStart, used: 0, resetAt: oldReset),
+            sample(at: oldStart.addingTimeInterval(4 * hour), used: 0, resetAt: oldReset)
+        ]
+
+        for (daysAgo, rate) in [(6, 1.0), (5, 3.0), (4, 1.0), (3, 3.0), (2, 0.0), (1, 0.0)] {
+            let start = now.addingTimeInterval(-TimeInterval(daysAgo) * day)
+            let historicalReset = start.addingTimeInterval(7 * day)
+            samples += [
+                sample(at: start, used: 0, resetAt: historicalReset),
+                sample(at: start.addingTimeInterval(hour), used: rate, resetAt: historicalReset),
+                sample(at: start.addingTimeInterval(2 * hour), used: rate, resetAt: historicalReset),
+                sample(at: start.addingTimeInterval(3 * hour), used: rate, resetAt: historicalReset),
+                sample(at: start.addingTimeInterval(4 * hour), used: rate, resetAt: historicalReset)
+            ]
+        }
+        samples += [
+            sample(at: now.addingTimeInterval(-60), used: 90, resetAt: now),
+            sample(at: now, used: 10, resetAt: resetAt)
+        ]
+
+        let forecast = try #require(historyForecast(samples, now: now))
+
+        #expect(forecast.projection[1] == UsageForecastPoint(
+            timestamp: now.addingTimeInterval(hour),
+            usedPercent: 12
+        ))
+        let saturdayMorning = try #require(forecast.projection.first {
+            $0.timestamp == now.addingTimeInterval(5 * day + hour)
+        })
+        #expect(saturdayMorning.usedPercent == 20)
+    }
+
+    @Test
+    func projectionStopsAtExactMidHourExhaustion() throws {
+        let now = date("2026-07-13T09:00:00Z")
+        let resetAt = now.addingTimeInterval(7 * day)
+        let samples = repeatingPattern(
+            now: now,
+            weeksAgo: [4, 3, 2, 1],
+            startOffsetHours: 0,
+            hourlyRates: Array(repeating: 2, count: 6),
+            currentUsed: 91,
+            currentResetAt: resetAt
+        )
+
+        let forecast = try #require(historyForecast(samples, now: now))
+
+        #expect(forecast.projection.last == UsageForecastPoint(
+            timestamp: now.addingTimeInterval(4.5 * hour),
+            usedPercent: 100
+        ))
+        #expect(forecast.exhaustionAt == now.addingTimeInterval(4.5 * hour))
     }
 
     @Test

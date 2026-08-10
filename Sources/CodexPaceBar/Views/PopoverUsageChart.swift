@@ -44,11 +44,12 @@ struct PopoverUsageChart: View {
                 ForEach(PopoverPresentation.forecastChartPoints(latest: history.currentSamples.last, forecast: model.forecast)) { point in
                     LineMark(
                         x: .value("Time", point.date),
-                        y: .value("Forecast", point.value),
-                        series: .value("Series", "Forecast")
+                        y: .value(PopoverPresentation.forecastLabel, point.value),
+                        series: .value("Series", PopoverPresentation.forecastLabel)
                     )
-                    .foregroundStyle(by: .value("Series", "Forecast"))
+                    .foregroundStyle(by: .value("Series", PopoverPresentation.forecastLabel))
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
+                    .interpolationMethod(.linear)
                 }
 
                 if let latest = history.currentSamples.last {
@@ -62,7 +63,7 @@ struct PopoverUsageChart: View {
             .chartForegroundStyleScale([
                 "Actual": Color.blue,
                 "Ideal": Color.gray,
-                "Forecast": Color.orange
+                PopoverPresentation.forecastLabel: Color.orange
             ])
             .chartLegend(.hidden)
             .chartYScale(domain: 0...100)
@@ -84,7 +85,9 @@ struct PopoverUsageChart: View {
                 PopoverChartLegendItem(label: "Actual", color: .blue)
                 PopoverChartLegendItem(label: "Ideal pace", color: .gray)
                 PopoverChartLegendItem(
-                    label: model.forecast == nil ? "Forecast pending" : "Forecast",
+                    label: model.forecast == nil
+                        ? "\(PopoverPresentation.forecastLabel) pending"
+                        : PopoverPresentation.forecastLabel,
                     color: model.forecast == nil ? .orange.opacity(0.4) : .orange
                 )
             }

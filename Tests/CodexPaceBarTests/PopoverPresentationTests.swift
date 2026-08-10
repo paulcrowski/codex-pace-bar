@@ -29,13 +29,27 @@ struct PopoverPresentationTests {
         let now = Date(timeIntervalSince1970: 5_000)
         let resetAt = now.addingTimeInterval(90 * 60)
         #expect(PopoverPresentation.hoursToReset(resetAt, now: now) == "2 h")
+        #expect(PopoverPresentation.forecastLabel == "Adaptive forecast")
 
         let forecast = UsageForecast(
             ratePercentagePointsPerHour: 10,
             exhaustionAt: now.addingTimeInterval(30 * 60),
             resetAt: resetAt
         )
-        #expect(PopoverPresentation.forecastStatus(forecast, now: now) == "Forecast: may run out in <1 h")
+        #expect(PopoverPresentation.forecastStatus(forecast, now: now) == "Adaptive forecast: may run out in <1 h")
+    }
+
+    @Test
+    func labelsLowConfidenceExhaustionWarningDuringWarmup() {
+        let now = Date(timeIntervalSince1970: 5_000)
+        let forecast = UsageForecast(
+            ratePercentagePointsPerHour: 10,
+            exhaustionAt: now.addingTimeInterval(30 * 60),
+            resetAt: now.addingTimeInterval(90 * 60),
+            confidence: .low
+        )
+
+        #expect(PopoverPresentation.forecastStatus(forecast, now: now) == "Adaptive forecast: may run out in <1 h · low confidence")
     }
 
     @Test
@@ -48,9 +62,19 @@ struct PopoverPresentationTests {
         #expect(ideal.last?.value == 100)
 
         let latest = UsageSample(timestamp: Date(timeIntervalSince1970: 9_000), usedPercent: 40, resetAt: resetAt, limitId: "codex")
-        let forecast = UsageForecast(ratePercentagePointsPerHour: 20, exhaustionAt: Date(timeIntervalSince1970: 10_000), resetAt: resetAt)
+        let forecast = UsageForecast(
+            ratePercentagePointsPerHour: 20,
+            exhaustionAt: Date(timeIntervalSince1970: 10_000),
+            resetAt: resetAt,
+            projection: [
+                UsageForecastPoint(timestamp: latest.timestamp, usedPercent: 40),
+                UsageForecastPoint(timestamp: Date(timeIntervalSince1970: 9_500), usedPercent: 40),
+                UsageForecastPoint(timestamp: resetAt, usedPercent: 45.55555555555556)
+            ]
+        )
         let points = PopoverPresentation.forecastChartPoints(latest: latest, forecast: forecast)
-        #expect(points.count == 2)
+        #expect(points.count == 3)
+        #expect(points[1].value == 40)
         #expect(points.last?.value == 45.55555555555556)
     }
 }

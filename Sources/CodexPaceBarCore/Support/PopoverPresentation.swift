@@ -13,6 +13,8 @@ public struct PopoverUsageChartPoint: Identifiable, Equatable, Sendable {
 }
 
 public enum PopoverPresentation {
+    public static let forecastLabel = "Adaptive forecast"
+
     public static func percent(_ value: Double) -> String {
         "\(Int(value.rounded()))%"
     }
@@ -44,11 +46,18 @@ public enum PopoverPresentation {
             return nil
         }
 
-        if forecast.willRunOutBeforeReset {
-            return "Forecast: may run out in \(hours(forecast.hoursUntilExhaustion(at: now)))"
+        if forecast.confidence == .low {
+            if forecast.willRunOutBeforeReset {
+                return "\(forecastLabel): may run out in \(hours(forecast.hoursUntilExhaustion(at: now))) · low confidence"
+            }
+            return "\(forecastLabel): likely lasts until reset · low confidence"
         }
 
-        return "Forecast: usage should last until reset"
+        if forecast.willRunOutBeforeReset {
+            return "\(forecastLabel): may run out in \(hours(forecast.hoursUntilExhaustion(at: now)))"
+        }
+
+        return "\(forecastLabel): usage should last until reset"
     }
 
     public static func idealChartPoints(for window: CodexLimitWindow?) -> [PopoverUsageChartPoint] {
@@ -64,10 +73,23 @@ public enum PopoverPresentation {
     }
 
     public static func forecastChartPoints(latest: UsageSample?, forecast: UsageForecast?) -> [PopoverUsageChartPoint] {
-        guard let latest, let forecast else {
+        guard let forecast else {
             return []
         }
 
+        if !forecast.projection.isEmpty {
+            return forecast.projection.enumerated().map { index, point in
+                PopoverUsageChartPoint(
+                    id: "forecast-\(index)",
+                    date: point.timestamp,
+                    value: point.usedPercent
+                )
+            }
+        }
+
+        guard let latest else {
+            return []
+        }
         let end = min(forecast.exhaustionAt, forecast.resetAt)
         let forecastHours = max(0, end.timeIntervalSince(latest.timestamp) / 3600)
         let endValue = min(100, latest.usedPercent + forecast.ratePercentagePointsPerHour * forecastHours)
