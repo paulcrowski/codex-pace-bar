@@ -22,12 +22,18 @@ public final class TaskMonitorCoordinator {
     private let watcherQueue: DispatchQueue
     private let hookEventURL: URL
     private let nativeGoalStore: CodexNativeGoalStore
+    private let presenceSampler: UserPresenceSampler
+    private let activityInsightsSamplingInterval: TimeInterval
+    private let freshnessPolicy = CodexTaskFreshnessPolicy()
     private var stores: [URL: TaskActivityStore] = [:]
     private var watchers: [URL: CodexSessionLogFileWatcher] = [:]
     private var directoryWatchers: [URL: CodexSessionLogDirectoryWatcher] = [:]
     private var hookEventWatcher: CodexHookEventWatcher?
     private var rescanTask: Task<Void, Never>?
     private var aggregateBackfillTask: Task<Void, Never>?
+    private var activityInsightsSamplingTask: Task<Void, Never>?
+    private var activityInsightsEnabled = false
+    private var lastPresenceSampleAt: Date?
     private var isRunning = false
 
     public var onChange: (() -> Void)?
@@ -38,6 +44,8 @@ public final class TaskMonitorCoordinator {
         databaseURL: URL = TaskMonitorCoordinator.defaultDatabaseURL,
         hookEventURL: URL? = nil,
         nativeGoalStore: CodexNativeGoalStore = CodexNativeGoalStore(),
+        presenceSampler: UserPresenceSampler = UserPresenceSampler(),
+        activityInsightsSamplingInterval: TimeInterval = 60,
         watcherQueue: DispatchQueue = DispatchQueue(
             label: "codex-pace-bar.task-monitor",
             qos: .utility
@@ -47,6 +55,8 @@ public final class TaskMonitorCoordinator {
         self.databaseURL = databaseURL
         self.watcherQueue = watcherQueue
         self.nativeGoalStore = nativeGoalStore
+        self.presenceSampler = presenceSampler
+        self.activityInsightsSamplingInterval = max(1, activityInsightsSamplingInterval)
         self.hookEventURL = hookEventURL ?? (
             databaseURL == Self.defaultDatabaseURL
                 ? Self.defaultHookEventURL
@@ -68,6 +78,7 @@ public final class TaskMonitorCoordinator {
         watchers.values.forEach { $0.stop() }
         hookEventWatcher?.stop()
         aggregateBackfillTask?.cancel()
+        activityInsightsSamplingTask?.cancel()
     }
 
     public func start() throws {
@@ -79,6 +90,7 @@ public final class TaskMonitorCoordinator {
             try startHookEventWatcher()
             try rescan()
             scheduleAggregateBackfillIfNeeded()
+            startActivityInsightsSamplingIfNeeded()
         } catch {
             isRunning = false
             throw error
@@ -181,6 +193,7 @@ public final class TaskMonitorCoordinator {
         watchers.values.forEach { $0.stop() }
         hookEventWatcher?.stop()
         hookEventWatcher = nil
+        stopActivityInsightsSampling()
         watchers.removeAll()
         stores.removeAll()
     }
@@ -191,6 +204,53 @@ public final class TaskMonitorCoordinator {
 
     public func statusEvents(since date: Date) async throws -> [CodexTaskStatusEvent] {
         try await queryStore.statusEvents(since: date)
+    }
+
+    public func activityInsights(on day: Date) async throws -> CodexActivityInsightsSummary {
+        try await queryStore.activityInsights(on: day)
+    }
+
+    public func setActivityInsightsEnabled(_ enabled: Bool) {
+        guard activityInsightsEnabled != enabled else { return }
+        activityInsightsEnabled = enabled
+        if enabled {
+            startActivityInsightsSamplingIfNeeded()
+        } else {
+            stopActivityInsightsSampling()
+        }
+    }
+
+    func captureActivityInsightsSample(at now: Date, duration: TimeInterval) async {
+        guard activityInsightsEnabled, duration > 0 else { return }
+        let userActive: Bool
+        switch presenceSampler.state() {
+        case .active:
+            userActive = true
+        case .inactive:
+            userActive = false
+        case .unavailable:
+            return
+        }
+
+        do {
+            let tasks = try await queryStore.tasks()
+            let hasFreshWorkingTask = tasks.contains { task in
+                task.isRunning && freshnessPolicy.isFresh(
+                    task: task,
+                    now: now,
+                    activeGoalThreadIDs: []
+                )
+            }
+            guard hasFreshWorkingTask else { return }
+            try await queryStore.recordActivityInsight(
+                userActive: userActive,
+                duration: min(duration, activityInsightsSamplingInterval),
+                at: now
+            )
+            onChange?()
+        } catch {
+            report(error)
+        }
     }
 
     public func goals() async throws -> [CodexGoalActivity] {
@@ -255,6 +315,30 @@ public final class TaskMonitorCoordinator {
     ) async throws {
         try await queryStore.saveCheckIn(rating: rating, rhythmScore: rhythmScore, day: day)
         onChange?()
+    }
+
+    private func startActivityInsightsSamplingIfNeeded() {
+        guard isRunning, activityInsightsEnabled, activityInsightsSamplingTask == nil else { return }
+        presenceSampler.start()
+        lastPresenceSampleAt = Date()
+        let interval = activityInsightsSamplingInterval
+        activityInsightsSamplingTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled, let self else { return }
+                let now = Date()
+                let elapsed = max(0, now.timeIntervalSince(lastPresenceSampleAt ?? now))
+                lastPresenceSampleAt = now
+                await captureActivityInsightsSample(at: now, duration: elapsed)
+            }
+        }
+    }
+
+    private func stopActivityInsightsSampling() {
+        activityInsightsSamplingTask?.cancel()
+        activityInsightsSamplingTask = nil
+        lastPresenceSampleAt = nil
+        presenceSampler.stop()
     }
 
     private func attach(fileURL: URL) throws {

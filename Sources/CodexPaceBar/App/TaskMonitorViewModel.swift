@@ -23,6 +23,7 @@ final class TaskMonitorViewModel {
     private(set) var swarms: [CodexSwarmActivity] = []
     private(set) var events: [CodexTaskStatusEvent] = []
     private(set) var checkIns: [CodexDailyWorkCheckIn] = []
+    private(set) var activityInsightsSummary: CodexActivityInsightsSummary = .empty
     private(set) var lastReloadDate: Date?
     private(set) var health: CodexTaskMonitorHealth = .loading
     private(set) var todaySummary = CodexTaskDailySummary(
@@ -34,6 +35,7 @@ final class TaskMonitorViewModel {
     private var isReloading = false
     private var reloadRequested = false
     var focusLoadEnabled: Bool
+    var activityInsightsEnabled: Bool
     var planAwareEstimatesEnabled: Bool
     var onTasksReloaded: (([CodexTaskActivity]) -> Void)?
     var onActivityReloaded: (([CodexTaskActivity], [CodexGoalActivity], [CodexSwarmActivity]) -> Void)?
@@ -41,10 +43,12 @@ final class TaskMonitorViewModel {
     init(
         coordinator: TaskMonitorCoordinator,
         focusLoadEnabled: Bool = false,
+        activityInsightsEnabled: Bool = false,
         planAwareEstimatesEnabled: Bool = true
     ) {
         self.coordinator = coordinator
         self.focusLoadEnabled = focusLoadEnabled
+        self.activityInsightsEnabled = activityInsightsEnabled
         self.planAwareEstimatesEnabled = planAwareEstimatesEnabled
         coordinator.onChange = { [weak self] in self?.reload() }
         coordinator.onError = { [weak self] error in
@@ -76,12 +80,14 @@ final class TaskMonitorViewModel {
                     async let loadedSwarms = coordinator.swarms()
                     async let loadedEvents = coordinator.statusEvents(since: dayStart)
                     async let loadedCheckIns = coordinator.checkIns(since: checkInStart)
+                    async let loadedActivityInsights = coordinator.activityInsights(on: dayStart)
                     tasks = try await loadedTasks
                     plans = Dictionary(uniqueKeysWithValues: try await loadedPlans.map { ($0.taskID, $0) })
                     goals = try await loadedGoals
                     swarms = try await loadedSwarms
                     events = try await loadedEvents
                     checkIns = try await loadedCheckIns
+                    activityInsightsSummary = try await loadedActivityInsights
                     todaySummary = summaryCalculator.calculate(
                         activities: tasks,
                         events: events,
@@ -369,6 +375,7 @@ final class TaskMonitorViewModel {
                 swarms = []
                 events = []
                 checkIns = []
+                activityInsightsSummary = .empty
                 todaySummary = CodexTaskDailySummary(
                     activeWallTime: 0,
                     agentHours: 0,

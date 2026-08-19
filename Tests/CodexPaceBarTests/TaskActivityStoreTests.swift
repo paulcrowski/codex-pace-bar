@@ -6,6 +6,38 @@ import Testing
 
 struct TaskActivityStoreTests {
     @Test
+    func storesOnlyDailyActivityInsightAggregatesAndClearsThem() async throws {
+        let databaseURL = try makeDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let store = try TaskActivityStore(databaseURL: databaseURL)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 19))!
+
+        try await store.recordActivityInsight(
+            userActive: true,
+            duration: 60,
+            at: day.addingTimeInterval(9 * 3_600),
+            calendar: calendar
+        )
+        try await store.recordActivityInsight(
+            userActive: false,
+            duration: 120,
+            at: day.addingTimeInterval(10 * 3_600),
+            calendar: calendar
+        )
+
+        let summary = try await store.activityInsights(on: day, calendar: calendar)
+        #expect(summary.handsOnTime == 60)
+        #expect(summary.handsOffTime == 120)
+        #expect(summary.observedCodexTime == 180)
+        #expect(abs((summary.handsOffSharePercent ?? 0) - 200.0 / 3.0) < 0.0001)
+
+        try await store.clearHistory()
+        #expect(try await store.activityInsights(on: day, calendar: calendar).observedCodexTime == 0)
+    }
+
+    @Test
     func clearHistoryRemovesTasksEventsAndCheckIns() async throws {
         let databaseURL = try makeDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }

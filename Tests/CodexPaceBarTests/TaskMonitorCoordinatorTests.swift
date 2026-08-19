@@ -1,4 +1,4 @@
-import CodexPaceBarAppSupport
+@testable import CodexPaceBarAppSupport
 import CodexPaceBarCore
 import Foundation
 import SQLite3
@@ -6,6 +6,39 @@ import Testing
 
 @MainActor
 struct TaskMonitorCoordinatorTests {
+    @Test
+    func minimalActivityInsightsRecordsOnlyWhenCodexIsWorking() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("tasks.sqlite")
+        let store = try TaskActivityStore(databaseURL: databaseURL, initialSessionID: "session")
+        let now = Date()
+        try await store.apply(.turnStarted(turnID: "turn", startedAt: now))
+
+        let sampler = UserPresenceSampler(idleReader: { 10 * 60 })
+        let coordinator = try TaskMonitorCoordinator(
+            catalog: CodexSessionLogCatalog(rootURL: directory),
+            databaseURL: databaseURL,
+            presenceSampler: sampler
+        )
+        try coordinator.start()
+        defer { coordinator.stop() }
+        coordinator.setActivityInsightsEnabled(true)
+
+        await coordinator.captureActivityInsightsSample(at: now.addingTimeInterval(60), duration: 60)
+        try await store.apply(.turnCompleted(
+            turnID: "turn",
+            completedAt: now.addingTimeInterval(61),
+            duration: 61,
+            timeToFirstToken: nil
+        ))
+        await coordinator.captureActivityInsightsSample(at: now.addingTimeInterval(120), duration: 60)
+
+        let summary = try await coordinator.activityInsights(on: now)
+        #expect(summary.handsOnTime == 0)
+        #expect(summary.handsOffTime == 60)
+    }
+
     @Test
     func mergesActiveNativeGoalWhenSessionLogHasNoGoalMarker() async throws {
         let directory = try makeDirectory()

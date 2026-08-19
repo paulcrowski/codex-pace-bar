@@ -143,6 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reconcileTaskMonitorRuntime()
         case .focusLoad:
             taskMonitorViewModel?.focusLoadEnabled = settings.focusLoadEnabled
+        case .activityInsights:
+            reconcileTaskMonitorRuntime()
+            taskMonitorCoordinator?.setActivityInsightsEnabled(settings.activityInsightsEnabled)
+            taskMonitorViewModel?.activityInsightsEnabled = settings.activityInsightsEnabled
+            taskMonitorViewModel?.reload()
         case .forecastMode:
             taskMonitorViewModel?.planAwareEstimatesEnabled = settings.planAwareEstimatesEnabled
             taskMonitorViewModel?.reload()
@@ -227,10 +232,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("Codex Pace Bar task monitor error: \(error.localizedDescription)")
             }
             try monitor.start()
+            monitor.setActivityInsightsEnabled(settings.activityInsightsEnabled)
             taskMonitorCoordinator = monitor
             let model = TaskMonitorViewModel(
                 coordinator: monitor,
                 focusLoadEnabled: settings.focusLoadEnabled,
+                activityInsightsEnabled: settings.activityInsightsEnabled,
                 planAwareEstimatesEnabled: settings.planAwareEstimatesEnabled
             )
             model.onActivityReloaded = { [weak self] tasks, goals, swarms in

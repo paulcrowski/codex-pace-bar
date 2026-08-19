@@ -41,6 +41,12 @@ public actor TaskActivityStore {
         rating TEXT NOT NULL,
         rhythm_score INTEGER
     );
+    CREATE TABLE IF NOT EXISTS activity_insights_daily (
+        day_start REAL PRIMARY KEY,
+        hands_on_seconds REAL NOT NULL DEFAULT 0,
+        hands_off_seconds REAL NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS goal_activity (
         goal_id TEXT PRIMARY KEY,
         thread_id TEXT NOT NULL,
@@ -451,9 +457,56 @@ public actor TaskActivityStore {
         try Self.loadCheckIns(since: date, from: database.pointer)
     }
 
+    public func recordActivityInsight(
+        userActive: Bool,
+        duration: TimeInterval,
+        at date: Date,
+        calendar: Calendar = .current
+    ) throws {
+        let duration = max(0, duration)
+        guard duration > 0 else { return }
+        let statement = try Self.prepare(
+            """
+            INSERT INTO activity_insights_daily (
+                day_start, hands_on_seconds, hands_off_seconds, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(day_start) DO UPDATE SET
+                hands_on_seconds = hands_on_seconds + excluded.hands_on_seconds,
+                hands_off_seconds = hands_off_seconds + excluded.hands_off_seconds,
+                updated_at = excluded.updated_at;
+            """,
+            on: database.pointer
+        )
+        defer { sqlite3_finalize(statement) }
+        try Self.bind(calendar.startOfDay(for: date).timeIntervalSince1970, to: statement, index: 1)
+        try Self.bind(userActive ? duration : 0, to: statement, index: 2)
+        try Self.bind(userActive ? 0 : duration, to: statement, index: 3)
+        try Self.bind(date.timeIntervalSince1970, to: statement, index: 4)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw TaskActivityStoreError.queryFailed(Self.errorMessage(database.pointer))
+        }
+    }
+
+    public func activityInsights(
+        on day: Date,
+        calendar: Calendar = .current
+    ) throws -> CodexActivityInsightsSummary {
+        let statement = try Self.prepare(
+            "SELECT hands_on_seconds, hands_off_seconds FROM activity_insights_daily WHERE day_start = ?;",
+            on: database.pointer
+        )
+        defer { sqlite3_finalize(statement) }
+        try Self.bind(calendar.startOfDay(for: day).timeIntervalSince1970, to: statement, index: 1)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .empty }
+        return CodexActivityInsightsSummary(
+            handsOnTime: Self.doubleColumn(statement, index: 0) ?? 0,
+            handsOffTime: Self.doubleColumn(statement, index: 1) ?? 0
+        )
+    }
+
     public func clearHistory() throws {
         try Self.execute(
-            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; DELETE FROM goal_activity; DELETE FROM swarm_activity; DELETE FROM forecast_observation; DELETE FROM task_initial_plan; PRAGMA wal_checkpoint(TRUNCATE);",
+            "DELETE FROM task_status_event; DELETE FROM task_activity; DELETE FROM daily_work_checkin; DELETE FROM activity_insights_daily; DELETE FROM goal_activity; DELETE FROM swarm_activity; DELETE FROM forecast_observation; DELETE FROM task_initial_plan; PRAGMA wal_checkpoint(TRUNCATE);",
             on: database.pointer
         )
         activities.removeAll()
@@ -599,6 +652,7 @@ public actor TaskActivityStore {
             WHERE COALESCE(last_event_at, completed_at, started_at, 0) < \(taskCutoff)
               AND status NOT IN ('queued', 'working', 'needsApproval', 'needsInput');
             DELETE FROM daily_work_checkin WHERE day_start < \(checkInCutoff);
+            DELETE FROM activity_insights_daily WHERE day_start < \(taskCutoff);
             DELETE FROM goal_activity
             WHERE updated_at < \(goalCutoff)
               AND status <> 'active';

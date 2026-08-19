@@ -410,6 +410,27 @@ public struct CodexTaskStatusEvent: Equatable, Sendable {
     }
 }
 
+public struct CodexActivityInsightsSummary: Equatable, Sendable {
+    public let handsOnTime: TimeInterval
+    public let handsOffTime: TimeInterval
+
+    public var observedCodexTime: TimeInterval {
+        handsOnTime + handsOffTime
+    }
+
+    public var handsOffSharePercent: Double? {
+        guard observedCodexTime > 0 else { return nil }
+        return handsOffTime / observedCodexTime * 100
+    }
+
+    public static let empty = CodexActivityInsightsSummary(handsOnTime: 0, handsOffTime: 0)
+
+    public init(handsOnTime: TimeInterval, handsOffTime: TimeInterval) {
+        self.handsOnTime = max(0, handsOnTime)
+        self.handsOffTime = max(0, handsOffTime)
+    }
+}
+
 public enum CodexDailyWorkRating: String, Codable, CaseIterable, Sendable {
     case calm
     case intense

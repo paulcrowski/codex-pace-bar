@@ -142,6 +142,20 @@ struct SettingsView: View {
             SettingsDivider()
 
             SettingsRow(
+                icon: "person.crop.circle.badge.clock",
+                title: "Activity insights · Minimal",
+                subtitle: settings.taskMonitorEnabled
+                    ? "Stores only daily hands-on and hands-off Codex time on this Mac."
+                    : "Enable Task Monitor to measure hands-on and hands-off time."
+            ) {
+                Toggle("Activity insights", isOn: $settings.activityInsightsEnabled)
+                    .disabled(!settings.taskMonitorEnabled)
+            }
+            .opacity(settings.taskMonitorEnabled ? 1 : 0.55)
+
+            SettingsDivider()
+
+            SettingsRow(
                 icon: "point.3.connected.trianglepath.dotted",
                 title: "Live Codex hooks · Optional",
                 subtitle: settings.taskMonitorEnabled

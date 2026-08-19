@@ -8,6 +8,7 @@ public final class SettingsStore {
     public enum Change {
         case codexExecutable
         case focusLoad
+        case activityInsights
         case taskMonitor
         case mainTaskSummary
         case taskNotifications
@@ -64,6 +65,14 @@ public final class SettingsStore {
         }
     }
 
+    public var activityInsightsEnabled: Bool {
+        didSet {
+            guard activityInsightsEnabled != oldValue else { return }
+            defaults.set(activityInsightsEnabled, forKey: Keys.activityInsightsEnabled)
+            onChange?(.activityInsights)
+        }
+    }
+
     public var taskNotificationsEnabled: Bool {
         didSet {
             guard taskNotificationsEnabled != oldValue else { return }
@@ -113,7 +122,10 @@ public final class SettingsStore {
 
     public var requiresBackgroundTaskMonitoring: Bool {
         taskMonitorEnabled && (
-            mainTaskSummaryEnabled || taskNotificationsEnabled || mobileTaskNotificationsEnabled
+            mainTaskSummaryEnabled
+                || taskNotificationsEnabled
+                || mobileTaskNotificationsEnabled
+                || activityInsightsEnabled
         )
     }
 
@@ -197,6 +209,7 @@ public final class SettingsStore {
         self.taskMonitorEnabled = defaults.object(forKey: Keys.taskMonitorEnabled) as? Bool ?? false
         self.mainTaskSummaryEnabled = defaults.object(forKey: Keys.mainTaskSummaryEnabled) as? Bool ?? false
         self.focusLoadEnabled = defaults.object(forKey: Keys.focusLoadEnabled) as? Bool ?? false
+        self.activityInsightsEnabled = defaults.object(forKey: Keys.activityInsightsEnabled) as? Bool ?? false
         self.taskNotificationsEnabled = defaults.object(forKey: Keys.taskNotificationsEnabled) as? Bool ?? false
         let storedMobileNotificationsEnabled = defaults.object(
             forKey: Keys.mobileTaskNotificationsEnabled
@@ -244,6 +257,7 @@ public final class SettingsStore {
         static let taskMonitorEnabled = "taskMonitorEnabled"
         static let mainTaskSummaryEnabled = "mainTaskSummaryEnabled"
         static let focusLoadEnabled = "focusLoadEnabled"
+        static let activityInsightsEnabled = "activityInsightsEnabled"
         static let taskNotificationsEnabled = "taskNotificationsEnabled"
         static let mobileTaskNotificationsEnabled = "mobileTaskNotificationsEnabled"
         static let mobileNotificationDetailsEnabled = "mobileNotificationDetailsEnabled"

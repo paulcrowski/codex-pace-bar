@@ -7,6 +7,13 @@ import Testing
 @Suite
 struct AppSupportTests {
     @Test
+    func presenceSamplerUsesFiveMinuteIdleThresholdAndFailsClosed() {
+        #expect(UserPresenceSampler(idleReader: { 299 }).state() == .active)
+        #expect(UserPresenceSampler(idleReader: { 300 }).state() == .inactive)
+        #expect(UserPresenceSampler(idleReader: { .nan }).state() == .unavailable)
+    }
+
+    @Test
     func experimentalFeaturesDefaultToOff() {
         let defaults = makeDefaults()
         defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
@@ -16,6 +23,7 @@ struct AppSupportTests {
         #expect(!settings.taskMonitorEnabled)
         #expect(!settings.mainTaskSummaryEnabled)
         #expect(!settings.focusLoadEnabled)
+        #expect(!settings.activityInsightsEnabled)
         #expect(!settings.taskNotificationsEnabled)
         #expect(!settings.mobileTaskNotificationsEnabled)
         #expect(!settings.mobileNotificationDetailsEnabled)
@@ -43,6 +51,10 @@ struct AppSupportTests {
         settings.silentGoalsAndSwarmsEnabled = true
         #expect(settings.requiresBackgroundTaskMonitoring)
 
+        settings.mobileTaskNotificationsEnabled = false
+        settings.activityInsightsEnabled = true
+        #expect(settings.requiresBackgroundTaskMonitoring)
+
         settings.taskMonitorEnabled = false
         #expect(!settings.requiresBackgroundTaskMonitoring)
     }
@@ -62,6 +74,7 @@ struct AppSupportTests {
         settings.taskMonitorEnabled = true
         settings.mainTaskSummaryEnabled = true
         settings.focusLoadEnabled = true
+        settings.activityInsightsEnabled = true
         settings.taskNotificationsEnabled = true
         settings.mobileTaskNotificationsEnabled = true
         settings.mobileNotificationDetailsEnabled = true
@@ -73,6 +86,7 @@ struct AppSupportTests {
         #expect(SettingsStore(defaults: defaults).taskMonitorEnabled == true)
         #expect(SettingsStore(defaults: defaults).mainTaskSummaryEnabled == true)
         #expect(SettingsStore(defaults: defaults).focusLoadEnabled == true)
+        #expect(SettingsStore(defaults: defaults).activityInsightsEnabled == true)
         #expect(SettingsStore(defaults: defaults).taskNotificationsEnabled == true)
         #expect(SettingsStore(defaults: defaults).mobileTaskNotificationsEnabled == true)
         #expect(SettingsStore(defaults: defaults).mobileNotificationDetailsEnabled == true)
@@ -92,6 +106,7 @@ struct AppSupportTests {
         settings.taskMonitorEnabled.toggle()
         settings.mainTaskSummaryEnabled.toggle()
         settings.focusLoadEnabled.toggle()
+        settings.activityInsightsEnabled.toggle()
         settings.taskNotificationsEnabled.toggle()
         settings.mobileTaskNotificationsEnabled.toggle()
         settings.mobileNotificationDetailsEnabled.toggle()
@@ -101,11 +116,12 @@ struct AppSupportTests {
         settings.deltaThresholdPercentagePoints = 5
         settings.barColorScheme = .statusColor
 
-        #expect(changes.count == 12)
+        #expect(changes.count == 13)
         #expect(changes.contains { if case .codexExecutable = $0 { true } else { false } })
         #expect(changes.contains { if case .taskMonitor = $0 { true } else { false } })
         #expect(changes.contains { if case .mainTaskSummary = $0 { true } else { false } })
         #expect(changes.contains { if case .focusLoad = $0 { true } else { false } })
+        #expect(changes.contains { if case .activityInsights = $0 { true } else { false } })
         #expect(changes.contains { if case .taskNotifications = $0 { true } else { false } })
         #expect(changes.contains { if case .mobileTaskNotifications = $0 { true } else { false } })
         #expect(changes.contains { if case .refreshInterval = $0 { true } else { false } })

@@ -86,6 +86,8 @@ public final class RefreshCoordinator {
             break
         case .focusLoad:
             break
+        case .activityInsights:
+            break
         case .refreshInterval:
             break
         case .forecastMode:

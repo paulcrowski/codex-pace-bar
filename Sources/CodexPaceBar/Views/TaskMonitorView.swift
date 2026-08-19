@@ -111,7 +111,10 @@ struct TaskMonitorView: View {
                         }
 
                         TodaySummary(
-                            summary: model.todaySummary
+                            summary: model.todaySummary,
+                            activityInsights: model.activityInsightsEnabled
+                                ? model.activityInsightsSummary
+                                : nil
                         )
 
                         if !finished.isEmpty {
@@ -262,6 +265,7 @@ private struct WorkRhythmSummary: View {
 
 private struct TodaySummary: View {
     let summary: CodexTaskDailySummary
+    let activityInsights: CodexActivityInsightsSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -280,6 +284,23 @@ private struct TodaySummary: View {
                 Text("Parallel agent time \(summary.agentHours.durationText)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+            }
+            if let activityInsights {
+                Divider()
+                if activityInsights.observedCodexTime > 0 {
+                    HStack(spacing: 12) {
+                        metric("Hands-on", activityInsights.handsOnTime.durationText)
+                        metric("Hands-off", activityInsights.handsOffTime.durationText)
+                        metric(
+                            "Hands-off share",
+                            activityInsights.handsOffSharePercent.map { "\(Int($0.rounded()))%" } ?? "—"
+                        )
+                    }
+                } else {
+                    Text("Activity Insights will appear after the first observed minute of Codex work.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
             Text("Wait counts only while Codex asks for approval or input; time after a task finishes is not counted.")
                 .font(.system(size: 10))
